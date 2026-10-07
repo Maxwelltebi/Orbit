@@ -1,18 +1,24 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { DefaultTheme, ThemeProvider } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { StyleSheet, View } from 'react-native';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
+import { OrbitBackground } from '@/components/orbit-art';
+import { OrbitProvider } from '@/state/orbit-context';
 
-SplashScreen.preventAutoHideAsync();
+const theme = { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: 'transparent', card: '#DCE8DB', primary: '#173F30' } };
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
+    <ThemeProvider value={theme}>
+      <OrbitProvider>
+        <View style={styles.root}>
+          <OrbitBackground />
+          <StatusBar style="light" />
+          <AppTabs />
+        </View>
+      </OrbitProvider>
     </ThemeProvider>
   );
 }
+const styles = StyleSheet.create({ root: { flex: 1, backgroundColor: '#254431' } });
