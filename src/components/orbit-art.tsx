@@ -32,7 +32,7 @@ export function OrbitBackground({ style }: { style?: StyleProp<ViewStyle> } = {}
   );
 }
 
-export function GlassSphere({ size }: { size: number }) {
+export function GlassSphere({ size }: { size: number | string }) {
   const id = useId().replace(/:/g, '');
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">

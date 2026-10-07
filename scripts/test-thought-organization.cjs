@@ -49,14 +49,51 @@ async function main() {
   assert.throws(() => organizer.validateOrganization('hello', { method: 'model', parts: [{ start: 0, end: 5, category: 'Test' }, { start: 2, end: 5, category: 'Test' }] }), /missed/);
   assert.throws(() => organizer.validateOrganization('hello', { method: 'model', parts: [{ start: 0, end: 8, category: 'Test' }] }), /invalid/);
   assert.throws(() => organizer.cleanCategory('???'));
-  for (let count = 1; count <= 50; count++) {
-    const positions = Array.from({ length: count }, (_, index) => layout.bubblePosition(index, count, 10000));
-    for (const [index, position] of positions.entries()) {
-      assert(position.x - position.radius >= 0 && position.x + position.radius <= 340, `horizontal bounds: ${count}/${index}`);
-      assert(position.y - position.radius >= 0 && position.y + position.radius <= layout.bubbleCanvasHeight(count), `vertical bounds: ${count}/${index}`);
-      for (const other of positions.slice(index + 1)) assert(Math.hypot(position.x - other.x, position.y - other.y) > position.radius + other.radius, `overlap: ${count}/${index}`);
-    }
+  // Centre ownership changes only on a strict overtake, including a later tie with an older category.
+  let leadership = store.emptyThoughtStore;
+  function submit(category, id) {
+    const text = 'A thought.';
+    const organization = organizer.validateOrganization(text, organizer.organizeManually(text, category));
+    leadership = store.appendThoughtDump(leadership, { id, text, createdAt: 1, method: 'manual' }, organization);
   }
-  console.log('Thought organization checks passed: splitting, category reuse/creation, original text, uncertain topics, validation, and 1–50 bubble layouts.');
+  submit('What if?', 'w1');
+  assert.equal(leadership.dominantCategoryId, 'category:what if');
+  submit('Family', 'f1');
+  assert.equal(leadership.dominantCategoryId, 'category:what if');
+  submit('Family', 'f2');
+  assert.equal(leadership.dominantCategoryId, 'category:family');
+  submit('What if?', 'w2');
+  assert.equal(leadership.dominantCategoryId, 'category:family');
+  submit('What if?', 'w3');
+  assert.equal(leadership.dominantCategoryId, 'category:what if');
+  assert.equal(layout.dominantCategory([], new Map(), null), null);
+  for (let count = 1; count <= 50; count++) {
+    const categories = Array.from({ length: count }, (_, index) => ({ id: String(index), label: String(index) }));
+    const counts = new Map(categories.map((category) => [category.id, 10000]));
+    const pages = layout.orbitPage(categories, counts, '0', 0).pageCount;
+    const seen = new Set();
+    for (let page = 0; page < pages; page++) {
+      const view = layout.orbitPage(categories, counts, '0', page);
+      assert.equal(view.bubbles.filter((bubble) => bubble.central).length, 1);
+      assert.equal(view.bubbles.find((bubble) => bubble.central).id, '0');
+      for (const bubble of view.bubbles.filter((bubble) => !bubble.central)) {
+        assert(!seen.has(bubble.id));
+        seen.add(bubble.id);
+      }
+      for (let step = 0; step < 36; step++) {
+        const phase = step * Math.PI * 2 / 36;
+        const positions = view.bubbles.map((bubble) => ({ ...bubble,
+          ...layout.orbitPoint(bubble.angle, bubble.central ? 0 : layout.ORBIT_RADIUS, phase) }));
+        assert.deepEqual(layout.orbitPoint(0, 0, phase), { x: 170, y: 170 });
+        for (const [index, position] of positions.entries()) {
+          assert(position.x - position.radius >= 0 && position.x + position.radius <= 340, `horizontal bounds: ${count}/${index}`);
+          assert(position.y - position.radius >= 0 && position.y + position.radius <= 340, `vertical bounds: ${count}/${index}`);
+          for (const other of positions.slice(index + 1)) assert(Math.hypot(position.x - other.x, position.y - other.y) > position.radius + other.radius, `overlap: ${count}/${index}`);
+        }
+      }
+    }
+    assert.equal(seen.size, count - 1, 'Every non-central category must remain reachable');
+  }
+  console.log('Thought organization checks passed: sorting, preservation, strict centre takeovers/ties, and full-orbit collision/bounds checks for 1–50 categories.');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

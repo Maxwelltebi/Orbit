@@ -1,20 +1,19 @@
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GlassSphere, OrbitIcon, OrbitRings } from '@/components/orbit-art';
+import { OrbitIcon } from '@/components/orbit-art';
+import { ThoughtOrbit } from '@/components/thought-orbit';
 import { OrbitButton, OrbitDialog } from '@/components/orbit-ui';
 import { orbitColors, previewEncouragement } from '@/constants/orbit-theme';
-import { bubbleCanvasHeight, bubblePosition } from '@/services/bubble-layout';
 import { suggestedCategories } from '@/services/thought-organizer';
 import { profileInitials, useOrbit } from '@/state/orbit-context';
 
 export default function HomeScreen() {
-  const { thoughts, categories, profile, addThought } = useOrbit();
+  const { thoughts, categories, dominantCategoryId, profile, addThought } = useOrbit();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const [canvasWidth, setCanvasWidth] = useState(Math.min(width - 48, 440));
+  const pathname = usePathname();
   const [composerOpen, setComposerOpen] = useState(false);
   const [thought, setThought] = useState('');
   const [categoryHint, setCategoryHint] = useState('');
@@ -25,7 +24,6 @@ export default function HomeScreen() {
   const [saveNotice, setSaveNotice] = useState('');
   const selectedCategory = categories.find((category) => category.id === openCategory);
   const categoryThoughts = thoughts.filter((entry) => entry.categoryId === openCategory);
-  const scale = canvasWidth / 340;
   const suggestions = [...new Set([...categories.map((category) => category.label), ...suggestedCategories])];
   const counts = new Map<string, number>();
   for (const entry of thoughts) counts.set(entry.categoryId, (counts.get(entry.categoryId) ?? 0) + 1);
@@ -69,36 +67,8 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <View style={[styles.universe, { height: bubbleCanvasHeight(categories.length) * scale }]}
-            onLayout={(event) => setCanvasWidth(event.nativeEvent.layout.width)}>
-            <View style={[StyleSheet.absoluteFill, { height: 330 * scale }]} pointerEvents="none"><OrbitRings /></View>
-            {!categories.length && <View style={styles.emptyOrbit}>
-              <GlassSphere size={104 * scale} />
-              <Text style={styles.emptyTitle}>Your orbit starts with one thought.</Text>
-              <Text style={styles.emptyBody}>Write freely. Your bubbles will grow from what you share.</Text>
-            </View>}
-            {categories.map((category, index) => {
-              const count = counts.get(category.id) ?? 0;
-              const position = bubblePosition(index, categories.length, count);
-              const radius = position.radius;
-              const size = radius * 2 * scale;
-              return (
-                <Pressable key={category.id} accessibilityRole="button"
-                  accessibilityLabel={`${category.label}, ${count} ${count === 1 ? 'thought' : 'thoughts'}. Open category.`}
-                  onPress={() => setOpenCategory(category.id)}
-                  style={({ pressed }) => [styles.bubble, {
-                    left: (position.x - radius) * scale, top: (position.y - radius) * scale,
-                    width: size, height: size, borderRadius: size / 2,
-                    transform: [{ scale: pressed ? 0.96 : 1 }],
-                  }]}>
-                  <View style={StyleSheet.absoluteFill} pointerEvents="none"><GlassSphere size={size} /></View>
-                  <Text style={[styles.bubbleLabel, { fontSize: index === 0 ? 19 : 14 }]}
-                    numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.7} maxFontSizeMultiplier={1.4}>{category.label}</Text>
-                  {count > 0 && <Text style={styles.bubbleCount}>{count} {count === 1 ? 'thought' : 'thoughts'}</Text>}
-                </Pressable>
-              );
-            })}
-          </View>
+          <ThoughtOrbit categories={categories} counts={counts} leaderId={dominantCategoryId}
+            paused={composerOpen || openCategory !== null || pathname !== '/'} onOpen={setOpenCategory} />
 
           <View style={styles.actions}>
             <Text style={styles.hint}>{categories.length ? 'Tap a bubble to revisit your thoughts.' : 'No need to choose a category. Start anywhere.'}</Text>
@@ -169,13 +139,6 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 17, color: '#E2ECDD', marginTop: 3 },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(224, 240, 217, 0.76)', alignItems: 'center', justifyContent: 'center' },
   initials: { fontSize: 15, fontWeight: '600', color: orbitColors.ink },
-  universe: { width: '100%', marginTop: 22, marginBottom: 12 },
-  emptyOrbit: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, paddingHorizontal: 32 },
-  emptyTitle: { fontSize: 19, color: orbitColors.white, textAlign: 'center', fontWeight: '500' },
-  emptyBody: { fontSize: 14, lineHeight: 21, color: '#E2ECDD', textAlign: 'center' },
-  bubble: { position: 'absolute', alignItems: 'center', justifyContent: 'center', padding: 7, boxShadow: '0px 0px 24px rgba(217, 239, 198, 0.18)' },
-  bubbleLabel: { color: '#163A2A', fontWeight: '500', textAlign: 'center' },
-  bubbleCount: { fontSize: 11, color: '#3D6046', marginTop: 5 },
   actions: { gap: 16 },
   hint: { textAlign: 'center', color: orbitColors.white, fontSize: 13 },
   calmCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, borderRadius: 22, backgroundColor: orbitColors.glass, borderWidth: 1, borderColor: 'rgba(245, 252, 238, 0.25)' },

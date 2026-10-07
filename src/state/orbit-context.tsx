@@ -4,7 +4,7 @@ import { organizeManually, organizePreview, validateOrganization, type Category,
 import { appendThoughtDump, emptyThoughtStore, type Thought, type ThoughtDump } from './thought-store';
 type Profile = { name: string; about: string };
 type OrbitState = {
-  thoughts: Thought[]; categories: Category[]; dumps: ThoughtDump[]; profile: Profile;
+  thoughts: Thought[]; categories: Category[]; dumps: ThoughtDump[]; dominantCategoryId: string | null; profile: Profile;
   addThought: (text: string, category?: string) => Promise<{ count: number; categories: string[]; unsorted: boolean }>;
   updateProfile: (profile: Profile) => void;
 };
