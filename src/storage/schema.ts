@@ -1,4 +1,4 @@
-export const DATABASE_VERSION = 2;
+export const DATABASE_VERSION = 3;
 
 // Static schema only. All user-provided values are passed as bound SQL parameters.
 export const INITIAL_SCHEMA = `
@@ -38,6 +38,22 @@ export const INITIAL_SCHEMA = `
   INSERT INTO profile (id, name, about) VALUES (1, '', '');
   INSERT INTO app_state (id, dominant_category_id) VALUES (1, NULL);
   PRAGMA user_version = 1;
+`;
+
+// Widen the verifier version constraint while preserving every saved credential.
+export const KEYED_LOGIN_MIGRATION = `
+  ALTER TABLE local_login RENAME TO local_login_legacy;
+  CREATE TABLE local_login (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL CHECK (version IN (1, 2)),
+    salt TEXT NOT NULL CHECK (length(salt) = 32),
+    verifier TEXT NOT NULL CHECK (length(verifier) = 64),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 20),
+    retry_at INTEGER NOT NULL DEFAULT 0 CHECK (retry_at >= 0)
+  );
+  INSERT INTO local_login SELECT * FROM local_login_legacy;
+  DROP TABLE local_login_legacy;
+  PRAGMA user_version = 3;
 `;
 
 // Version 1 journals remain intact; credentials are created only after local setup.

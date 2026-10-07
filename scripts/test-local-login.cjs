@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { randomBytes, pbkdf2Sync } = require('node:crypto');
+const { randomBytes, pbkdf2Sync, createHmac } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const load = require('./lib/load-ts.cjs');
@@ -9,6 +9,7 @@ const { createLocalLogin } = load('src/security/local-login.ts');
 const { derivePin, PIN_ITERATIONS } = load('src/security/pin-hash.ts');
 const { organizeManually } = load('src/services/thought-organizer.ts');
 const { validateLoginRecord } = load('src/security/login-record.ts');
+const { loginDeadline } = load('src/security/login-deadline.ts');
 
 async function main() {
   const folder = fs.mkdtempSync(path.resolve(__dirname, '../.expo/login-test-'));
@@ -44,7 +45,8 @@ async function main() {
     const record = await repo.loadLogin();
     assert(!Object.values(record).includes('612345'), 'No plaintext PIN in SQLite');
     assert(!JSON.stringify(record).includes(secret), 'Device pepper is absent from SQLite');
-    assert.equal(record.verifier, pbkdf2Sync(`612345:${secret}`, Buffer.from(record.salt, 'hex'), PIN_ITERATIONS, 32, 'sha256').toString('hex'));
+    assert.equal(record.version, 2);
+    assert.equal(record.verifier, createHmac('sha256', Buffer.from(secret, 'hex')).update(`orbit.local-pin.v2:${record.salt}:612345`).digest('hex'));
     await assert.rejects(auth.setup('Other', '999999', '999999'), /already exists/);
     await auth.unlock(' alex ', '612345');
     for (let i = 0; i < 5; i++) await assert.rejects(auth.unlock('Alex', '999999'), /did not match/);
@@ -82,7 +84,40 @@ async function main() {
     assert.throws(() => validateLoginRecord({ ...record, retryAt: -1 }));
     const unrelatedSalt = await random(16);
     assert.notEqual(await derivePin('612345', unrelatedSalt, secret), record.verifier);
-    console.log('Local login checks passed: hashed PIN, Node crypto comparison, atomic setup, key errors, name/PIN verification, persisted lockout/restart, retry and journal preservation.');
+    assert.notEqual(await derivePin('612345', record.salt, await random(32)), record.verifier);
+    // The old 600,000-round format remains readable, then upgrades after a correct PIN.
+    const legacyHash = pbkdf2Sync(`612345:${secret}`, Buffer.from(record.salt, 'hex'), PIN_ITERATIONS, 32, 'sha256').toString('hex');
+    handle.raw.prepare('UPDATE local_login SET version = 1, verifier = ? WHERE id = 1').run(legacyHash);
+    await assert.rejects(auth.unlock('Alex Lane', '999999'), /did not match/);
+    assert.equal((await repo.loadLogin()).version, 1, 'Wrong legacy PIN never upgrades the verifier');
+    await auth.unlock('Alex Lane', '612345');
+    assert.equal((await repo.loadLogin()).version, 2);
+    await auth.unlock('Alex Lane', '612345');
+    await assert.rejects(loginDeadline(new Promise(() => {}), () => 'testing a stalled native call', 10), /Login took too long.*stalled native call/);
+    assert.equal(await loginDeadline(Promise.resolve('ready'), () => 'loading', 10), 'ready');
+    // UI deadlines never release a pending native mutation's queue. A late setup
+    // cannot be overtaken by another setup which replaces the device key.
+    const second = connect(':memory:');
+    try {
+      const secondRepo = await createSQLiteRepository(second.connection);
+      let release;
+      let savedKey;
+      let writes = 0;
+      const slowVault = { read: async () => savedKey ?? null, write: (value) => new Promise((resolve) => {
+        writes++; release = () => { savedKey = value; resolve(); };
+      }) };
+      const slow = createLocalLogin(secondRepo, slowVault, random, derivePin, () => time, 30);
+      await assert.rejects(slow.setup('First', '612345', '612345'), /took too long/);
+      const recreated = createLocalLogin(secondRepo, slowVault, random, derivePin, () => time, 30);
+      const retry = recreated.setup('Second', '999999', '999999');
+      assert.equal(writes, 1);
+      release();
+      await assert.rejects(retry, /already exists/);
+      assert.equal(writes, 1);
+      assert.equal((await secondRepo.load()).profile.name, 'First');
+      await slow.unlock('First', '612345');
+    } finally { second.raw.close(); }
+    console.log('Local login checks passed: keyed verifier, Node crypto comparison, legacy upgrade, bounded waits, late-save serialization, atomic setup, key errors, persisted lockout/restart and journal preservation.');
   } finally {
     handle.raw.close();
     for (const suffix of ['', '-wal', '-shm', '-journal']) {

@@ -13,6 +13,7 @@ export interface OrbitRepository {
   loadLogin(): Promise<LoginRecord | null>;
   createLogin(name: string, record: LoginRecord): Promise<OrbitSnapshot>;
   updateLoginAttempts(attempts: number, retryAt: number): Promise<void>;
+  upgradeLogin(record: LoginRecord): Promise<void>;
 }
 
 export function cleanProfile(profile: Profile): Profile {

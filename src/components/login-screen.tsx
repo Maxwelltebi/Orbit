@@ -5,9 +5,10 @@ import { GlassSphere, OrbitBackground, OrbitIcon } from './orbit-art';
 import { OrbitButton } from './orbit-ui';
 import { orbitColors } from '@/constants/orbit-theme';
 
-export function LoginScreen({ setup, initialName, browser, onSubmit }: {
+export function LoginScreen({ setup, initialName, browser, onSubmit, onStopWaiting }: {
   setup: boolean; initialName: string; browser: boolean;
-  onSubmit: (name: string, pin: string, confirmation: string) => Promise<void>;
+  onSubmit: (name: string, pin: string, confirmation: string, report: (stage: string) => void) => Promise<void>;
+  onStopWaiting: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [name, setName] = useState(initialName);
@@ -16,6 +17,7 @@ export function LoginScreen({ setup, initialName, browser, onSubmit }: {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [stage, setStage] = useState('');
   const submitLock = useRef(false);
   const pinInput = useRef<TextInput>(null);
   const confirmInput = useRef<TextInput>(null);
@@ -25,12 +27,14 @@ export function LoginScreen({ setup, initialName, browser, onSubmit }: {
     submitLock.current = true;
     setBusy(true);
     setError('');
-    try { await onSubmit(name, pin, confirmation); }
+    setStage('opening your saved login');
+    try { await onSubmit(name, pin, confirmation, setStage); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not open your Orbit. Please try again.'); }
     finally {
       // Do not retain an entered PIN after either a failed or successful attempt.
       setPin(''); setConfirmation('');
       submitLock.current = false; setBusy(false);
+      setStage('');
     }
   }
   return (
@@ -77,9 +81,12 @@ export function LoginScreen({ setup, initialName, browser, onSubmit }: {
                   placeholderTextColor="#738574" accessibilityLabel="Confirm PIN" style={styles.pin} onSubmitEditing={submit} />
               </>}
               {!!error && <Text style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="polite">{error}</Text>}
+              {busy && <Text style={styles.note} accessibilityLiveRegion="polite">{stage.charAt(0).toUpperCase() + stage.slice(1)}…</Text>}
               <OrbitButton disabled={!valid || busy} onPress={submit} style={styles.submit}>
                 {busy ? (setup ? 'Saving your login…' : 'Opening your Orbit…') : setup ? 'Create my space' : 'Log in'}
               </OrbitButton>
+              {busy && <Pressable accessibilityRole="button" accessibilityLabel="Stop waiting for login"
+                onPress={onStopWaiting} style={styles.stop}><Text style={styles.showText}>Stop waiting</Text></Pressable>}
               <Text style={styles.note}>{setup
                 ? 'Keep your PIN somewhere safe. This local login has no email reset.'
                 : 'Forgot your PIN? There is no online reset. Your saved thoughts stay on this device.'}</Text>
@@ -110,6 +117,7 @@ const styles = StyleSheet.create({
   pin: { minHeight: 50, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.7)', fontSize: 18, letterSpacing: 3, color: orbitColors.ink, marginBottom: 18 },
   error: { color: '#9B302C', fontSize: 13, lineHeight: 20, marginBottom: 12 },
   submit: { marginTop: 4 },
+  stop: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   note: { color: orbitColors.muted, fontSize: 12, lineHeight: 19, textAlign: 'center', marginTop: 18 },
   footer: { color: '#F0F7EB', fontSize: 12, lineHeight: 19, textAlign: 'center', marginTop: 24 },
 });

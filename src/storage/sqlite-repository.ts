@@ -2,7 +2,7 @@ import { categoryKey, validateOrganization, type Category, type Organization } f
 import { dominantCategory } from '../services/bubble-layout';
 import { appendThoughtDump, type Thought, type ThoughtDump } from '../state/thought-store';
 import { cleanProfile, createStorageQueue, type OrbitRepository, type OrbitSnapshot, type Profile } from './repository';
-import { DATABASE_VERSION, INITIAL_SCHEMA, LOGIN_MIGRATION } from './schema';
+import { DATABASE_VERSION, INITIAL_SCHEMA, LOGIN_MIGRATION, KEYED_LOGIN_MIGRATION } from './schema';
 import { validateLoginRecord, type LoginRecord } from '../security/login-record';
 
 type SqlValue = string | number | null;
@@ -37,6 +37,7 @@ export async function createSQLiteRepository(db: SqlConnection): Promise<OrbitRe
     if (version > DATABASE_VERSION) throw new Error('This Orbit database needs a newer app version.');
     if (version === 0) await db.execAsync(INITIAL_SCHEMA);
     if (version < 2) await db.execAsync(LOGIN_MIGRATION);
+    if (version < 3) await db.execAsync(KEYED_LOGIN_MIGRATION);
   });
   const enqueue = createStorageQueue();
 
@@ -72,6 +73,12 @@ export async function createSQLiteRepository(db: SqlConnection): Promise<OrbitRe
       if (!current) throw new Error('Set up your local login first.');
       validateLoginRecord({ ...current, attempts, retryAt });
       await db.runAsync('UPDATE local_login SET attempts = ?, retry_at = ? WHERE id = 1', attempts, retryAt);
+    })),
+    upgradeLogin: (input) => enqueue(() => transaction(async () => {
+      const record = validateLoginRecord(input);
+      const current = await readLogin();
+      if (!current || current.version !== 1 || record.version !== 2 || record.salt !== current.salt) throw new Error('The saved login changed. Please try again.');
+      await db.runAsync('UPDATE local_login SET version = 2, verifier = ?, attempts = 0, retry_at = 0 WHERE id = 1', record.verifier);
     })),
     saveThoughtDump: (text: string, input: Organization) => enqueue(async () => {
       if (!text.trim() || text.length > 12000) throw new Error('Please enter a thought of up to 12,000 characters.');

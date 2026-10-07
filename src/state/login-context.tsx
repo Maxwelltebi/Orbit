@@ -3,6 +3,7 @@ import { AppState, Keyboard, Platform } from 'react-native';
 import { LoginScreen } from '@/components/login-screen';
 import { StorageGate } from '@/components/storage-gate';
 import { createLocalLogin, type LocalLogin } from '@/security/local-login';
+import { loginDeadline } from '@/security/login-deadline';
 import { randomHex, secretStore } from '@/security/secret-store';
 import { openOrbitRepository } from '@/storage/database';
 import { useOrbit } from './orbit-context';
@@ -51,14 +52,14 @@ export function LoginProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  async function submit(name: string, pin: string, confirmation: string) {
+  async function submit(name: string, pin: string, confirmation: string, report: (stage: string) => void) {
     if (!login.current) throw new Error('Your saved login is still loading.');
     const currentGeneration = generation.current;
     if (phase === 'setup') {
-      await login.current.setup(name, pin, confirmation);
-      try { await refreshOrbit(); }
+      await login.current.setup(name, pin, confirmation, report);
+      try { await loginDeadline(refreshOrbit(), () => 'loading your saved profile', 30000); }
       catch { if (mounted.current) { setFailure('Your login was saved, but your profile could not load. Please try again.'); setPhase('error'); } return; }
-    } else await login.current.unlock(name, pin);
+    } else await login.current.unlock(name, pin, report);
     // A completed hash must not reopen the app after a background/lock event.
     if (mounted.current) setPhase(currentGeneration === generation.current && AppState.currentState === 'active' ? 'unlocked' : 'locked');
   }
@@ -67,7 +68,7 @@ export function LoginProvider({ children }: { children: ReactNode }) {
     message={phase === 'error' ? failure : 'Opening your saved login.'}
     onRetry={() => { setPhase('loading'); setAttempt((value) => value + 1); }} />;
   if (phase !== 'unlocked') return <LoginScreen key={`${phase}:${screenVersion}`} setup={phase === 'setup'} initialName={profile.name}
-    browser={storageKind === 'browser'} onSubmit={submit} />;
+    browser={storageKind === 'browser'} onSubmit={submit} onStopWaiting={lock} />;
   return <LoginContext value={{ lock }}>{children}</LoginContext>;
 }
 export function useLogin() {

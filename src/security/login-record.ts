@@ -1,10 +1,10 @@
 export type LoginRecord = {
-  version: 1; salt: string; verifier: string; attempts: number; retryAt: number;
+  version: 1 | 2; salt: string; verifier: string; attempts: number; retryAt: number;
 };
 
 export function validateLoginRecord(value: unknown): LoginRecord {
   const record = value as LoginRecord | null;
-  if (!record || record.version !== 1 || typeof record.salt !== 'string' || !/^[0-9a-f]{32}$/.test(record.salt)
+  if (!record || ![1, 2].includes(record.version) || typeof record.salt !== 'string' || !/^[0-9a-f]{32}$/.test(record.salt)
     || typeof record.verifier !== 'string' || !/^[0-9a-f]{64}$/.test(record.verifier)
     || !Number.isSafeInteger(record.attempts) || record.attempts < 0 || record.attempts > 20
     || !Number.isSafeInteger(record.retryAt) || record.retryAt < 0) {

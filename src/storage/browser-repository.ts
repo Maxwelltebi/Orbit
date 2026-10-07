@@ -41,6 +41,12 @@ export function createBrowserRepository(storage: BrowserStorage): OrbitRepositor
       if (!current.login) throw new Error('Set up your local login first.');
       persist(current.orbit, validateLoginRecord({ ...current.login, attempts, retryAt }));
     }),
+    upgradeLogin: (input) => enqueue(async () => {
+      const record = validateLoginRecord(input);
+      const current = readStored();
+      if (!current.login || current.login.version !== 1 || record.version !== 2 || record.salt !== current.login.salt) throw new Error('The saved login changed. Please try again.');
+      persist(current.orbit, { ...record, attempts: 0, retryAt: 0 });
+    }),
     saveThoughtDump: (text: string, input: Organization) => enqueue(async () => {
       if (!text.trim() || text.length > 12000) throw new Error('Please enter a thought of up to 12,000 characters.');
       const organization = validateOrganization(text, input);

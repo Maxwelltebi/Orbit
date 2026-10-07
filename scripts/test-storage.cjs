@@ -5,7 +5,7 @@ const { DatabaseSync } = require('node:sqlite');
 const load = require('./lib/load-ts.cjs');
 const { createSQLiteRepository } = load('src/storage/sqlite-repository.ts');
 const { createBrowserRepository } = load('src/storage/browser-repository.ts');
-const { INITIAL_SCHEMA } = load('src/storage/schema.ts');
+const { INITIAL_SCHEMA, LOGIN_MIGRATION } = load('src/storage/schema.ts');
 const { organizeManually, organizePreview } = load('src/services/thought-organizer.ts');
 
 // Exercise actual SQLite transactions through the same interface Expo provides.
@@ -52,8 +52,28 @@ async function main() {
     assert.equal(existing.thoughts[0].text, 'My family.');
     assert.equal(existing.dominantCategoryId, 'category:family');
     assert.equal(await migrated.loadLogin(), null);
-    assert.equal(legacy.raw.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(legacy.raw.prepare('PRAGMA user_version').get().user_version, 3);
   } finally { legacy.raw.close(); }
+  const versionTwo = connect(':memory:');
+  try {
+    versionTwo.raw.exec(INITIAL_SCHEMA);
+    versionTwo.raw.exec(LOGIN_MIGRATION);
+    const oldLogin = { version: 1, salt: 'ab'.repeat(16), verifier: 'cd'.repeat(32), attempts: 5, retryAt: 123456 };
+    versionTwo.raw.prepare('INSERT INTO local_login VALUES (1, ?, ?, ?, ?, ?)').run(
+      oldLogin.version, oldLogin.salt, oldLogin.verifier, oldLogin.attempts, oldLogin.retryAt);
+    const originalExec = versionTwo.connection.execAsync;
+    versionTwo.connection.execAsync = async (sql) => {
+      await originalExec(sql);
+      if (sql.includes('RENAME TO local_login_legacy')) throw new Error('Interrupted migration');
+    };
+    await assert.rejects(createSQLiteRepository(versionTwo.connection), /Interrupted migration/);
+    assert.equal(versionTwo.raw.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(versionTwo.raw.prepare('SELECT verifier FROM local_login').get().verifier, oldLogin.verifier);
+    versionTwo.connection.execAsync = originalExec;
+    const migrated = await createSQLiteRepository(versionTwo.connection);
+    assert.deepEqual(await migrated.loadLogin(), oldLogin, 'Version 2 migration preserves old verifier and cooldown');
+    assert.equal(versionTwo.raw.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  } finally { versionTwo.raw.close(); }
   const scratch = path.resolve(__dirname, '../.expo');
   fs.mkdirSync(scratch, { recursive: true });
   const folder = fs.mkdtempSync(path.join(scratch, 'storage-test-'));
@@ -62,7 +82,7 @@ async function main() {
   try {
     handle = connect(filename);
     let repo = await createSQLiteRepository(handle.connection);
-    assert.equal(handle.raw.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(handle.raw.prepare('PRAGMA user_version').get().user_version, 3);
     assert.equal(handle.raw.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     assert.equal(handle.raw.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
     assert.deepEqual(plain(await repo.load()).profile, { name: '', about: '' });
@@ -124,10 +144,10 @@ async function main() {
     assert(Number(saved.dumps[0].id) > Number(beforeReopen.dumps[0].id));
     assert.equal(new Set(saved.thoughts.map((thought) => thought.id)).size, saved.thoughts.length);
 
-    handle.raw.exec('PRAGMA user_version = 3');
+    handle.raw.exec('PRAGMA user_version = 4');
     await assert.rejects(createSQLiteRepository(handle.connection), /newer app version/);
     assert.equal(handle.raw.prepare('SELECT count(*) AS total FROM thoughts').get().total, saved.thoughts.length);
-    assert.equal(handle.raw.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(handle.raw.prepare('PRAGMA user_version').get().user_version, 4);
 
     // Browser preview has separate persistent storage and propagates quota/corruption errors.
     let value = null;
