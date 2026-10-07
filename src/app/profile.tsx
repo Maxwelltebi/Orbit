@@ -8,13 +8,33 @@ import { orbitColors } from '@/constants/orbit-theme';
 import { profileInitials, useOrbit } from '@/state/orbit-context';
 
 export default function ProfileScreen() {
-  const { profile, updateProfile } = useOrbit();
+  const { profile, storageKind, updateProfile } = useOrbit();
   const insets = useSafeAreaInsets();
   const [name, setName] = useState(profile.name);
   const [about, setAbout] = useState(profile.about);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const saveLock = useRef(false);
   const nameInput = useRef<TextInput>(null);
   const initials = profileInitials(saved ? profile.name : name);
+
+  async function saveProfile() {
+    if (saveLock.current) return;
+    saveLock.current = true;
+    setSaving(true);
+    setSaved(false);
+    setSaveError('');
+    try {
+      await updateProfile({ name: name.trim(), about: about.trim() });
+      setSaved(true);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Your profile could not be saved. Please try again.');
+    } finally {
+      saveLock.current = false;
+      setSaving(false);
+    }
+  }
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -28,7 +48,7 @@ export default function ProfileScreen() {
             <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.initialsPosition]}>
               {initials ? <Text style={styles.initials}>{initials}</Text> : <OrbitIcon name="person" size={36} />}
             </View>
-            <Pressable style={styles.edit} onPress={() => nameInput.current?.focus()}
+            <Pressable style={styles.edit} disabled={saving} onPress={() => nameInput.current?.focus()}
               accessibilityRole="button" accessibilityLabel="Edit your name">
               <OrbitIcon name="edit" size={19} />
             </Pressable>
@@ -39,23 +59,21 @@ export default function ProfileScreen() {
               <OrbitIcon name="person" size={18} color="#4C735A" />
               <TextInput ref={nameInput} value={name} onChangeText={(value) => { setName(value); setSaved(false); }}
                 placeholder="Your name" placeholderTextColor="#738574" accessibilityLabel="Your name"
-                autoCapitalize="words" maxLength={80} style={styles.nameInput} />
+                autoCapitalize="words" maxLength={80} editable={!saving} style={styles.nameInput} />
             </View>
             <Text style={styles.label}>About me</Text>
             <TextInput value={about} onChangeText={(value) => { setAbout(value); setSaved(false); }}
               placeholder="A little about you, in your own words." placeholderTextColor="#738574"
-              accessibilityLabel="About you" multiline textAlignVertical="top" maxLength={500} style={styles.aboutInput} />
-            <OrbitButton style={styles.save} onPress={() => {
-              updateProfile({ name: name.trim(), about: about.trim() });
-              setSaved(true);
-            }}>Save changes</OrbitButton>
-            {saved && <Text accessibilityLiveRegion="polite" style={styles.saved}>Profile updated for this session.</Text>}
+              accessibilityLabel="About you" multiline textAlignVertical="top" maxLength={500} editable={!saving} style={styles.aboutInput} />
+            <OrbitButton style={styles.save} disabled={saving} onPress={saveProfile}>{saving ? 'Saving…' : 'Save changes'}</OrbitButton>
+            {saved && <Text accessibilityLiveRegion="polite" style={styles.saved}>Profile saved {storageKind === 'browser' ? 'in this browser' : 'on this device'}.</Text>}
+            {!!saveError && <Text accessibilityRole="alert" style={styles.error}>{saveError}</Text>}
           </View>
           <View style={styles.localNote}>
             <OrbitIcon name="orbit" size={22} color="#345B40" />
             <View style={styles.noteText}>
-              <Text style={styles.noteTitle}>Your space. No account needed.</Text>
-              <Text style={styles.noteBody}>Changes in this preview last until the app restarts.</Text>
+              <Text style={styles.noteTitle}>Your space. Your local login.</Text>
+              <Text style={styles.noteBody}>Your profile and thoughts are saved {storageKind === 'browser' ? 'in this browser' : 'on this device'}. If you change your name, use the updated name with the same PIN to log in.</Text>
             </View>
           </View>
         </View>
@@ -81,6 +99,7 @@ const styles = StyleSheet.create({
   aboutInput: { minHeight: 104, padding: 14, backgroundColor: 'rgba(255,255,255,0.65)', borderRadius: 12, fontSize: 15, lineHeight: 22, color: orbitColors.ink },
   save: { marginTop: 24 },
   saved: { color: orbitColors.ink, fontSize: 12, textAlign: 'center', marginTop: 14 },
+  error: { color: '#9B302C', fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 14 },
   localNote: { flexDirection: 'row', gap: 12, padding: 18, marginTop: 20 },
   noteText: { flex: 1, gap: 6 },
   noteTitle: { color: '#234432', fontSize: 13, fontWeight: '500' },

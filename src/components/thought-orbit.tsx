@@ -54,9 +54,9 @@ function MovingBubble({ bubble, scale, phase, touching, reducedMotion, onOpen }:
         accessibilityLabel={`${bubble.label}, ${bubble.count} ${bubble.count === 1 ? 'thought' : 'thoughts'}. ${bubble.central ? 'Central category.' : 'Orbiting category.'} Open category.`}
         style={({ pressed }) => [styles.bubble, pressed && styles.pressed]}>
         <View style={StyleSheet.absoluteFill} pointerEvents="none"><GlassSphere size="100%" /></View>
-        <Text style={[styles.label, { fontSize: bubble.central ? 19 : 13 }]} numberOfLines={3}
+        <Text style={[styles.label, { fontSize: bubble.central ? 19 : 13 }]} numberOfLines={bubble.central ? 3 : 2}
           adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.3}>{bubble.label}</Text>
-        <Text style={styles.count}>{bubble.count} {bubble.count === 1 ? 'thought' : 'thoughts'}</Text>
+        <Text style={styles.count} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{bubble.count} {bubble.count === 1 ? 'thought' : 'thoughts'}</Text>
       </Pressable>
     </Animated.View>
   );
@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
   movingBubble: { position: 'absolute', top: 0, left: 0 },
   bubble: { flex: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', padding: 6,
     boxShadow: '0px 0px 24px rgba(217, 239, 198, 0.18)' },
-  label: { color: '#163A2A', fontWeight: '500', textAlign: 'center' },
+  label: { color: '#163A2A', fontWeight: '500', textAlign: 'center', flexShrink: 1 },
   count: { fontSize: 10, color: '#3D6046', marginTop: 4 },
   pressed: { opacity: 0.8 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, paddingHorizontal: 32 },

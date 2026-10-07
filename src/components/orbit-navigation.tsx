@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { OrbitIcon, type OrbitIconName } from './orbit-art';
 import { orbitColors } from '@/constants/orbit-theme';
+import { useLogin } from '@/state/login-context';
 
 // Add future pages here; the menu and shared Back control stay consistent.
 const pages: { href: Href; title: string; icon: OrbitIconName }[] = [
@@ -13,6 +14,7 @@ const pages: { href: Href; title: string; icon: OrbitIconName }[] = [
 ];
 
 export default function OrbitNavigation() {
+  const { lock } = useLogin();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -91,7 +93,13 @@ export default function OrbitNavigation() {
                 );
               })}
             </ScrollView>
-            <Text style={styles.footer}>Your space. No account needed.</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Lock Orbit" onPress={() => {
+              setMenuOpen(false); Keyboard.dismiss(); lock();
+            }} style={styles.link}>
+              <OrbitIcon name="lock" size={24} />
+              <Text style={styles.linkText}>Lock Orbit</Text>
+            </Pressable>
+            <Text style={styles.footer}>Your space. Your local login.</Text>
           </View>
         </View>
       </Modal>

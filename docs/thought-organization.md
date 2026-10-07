@@ -8,9 +8,11 @@ Expo Go uses `organizePreview`: conservative keyword matching, sentence/line spl
 
 `OrbitProvider` accepts a `ThoughtOrganizer` implementation. The organizer receives the original text and existing category IDs/labels, then returns an asynchronous organization with `method: 'model'` and parts `{ start, end, category }`. Offsets are JavaScript UTF-16 indices into the original input. No text paraphrasing is allowed. Existing category names should be reused; a new concise category name is permitted for a genuinely new subject.
 
-`validateOrganization` rejects missing text, overlaps, invalid offsets, empty segments and invalid category names. A failed submission retains the draft. `appendThoughtDump` atomically saves the original dump, exact source segments and new/reused categories. Category IDs remain stable as bubbles grow. The bubble layout expands vertically after five categories, with no fixed category limit.
+`validateOrganization` rejects missing text, overlaps, invalid offsets, empty segments and invalid category names. A failed submission retains the draft. `appendThoughtDump` atomically saves the original dump, exact source segments and new/reused categories. Category IDs remain stable as bubbles grow.
 
-This remains session storage. Original dumps, thought parts and categories will need SQLite tables before this is used for real journaling.
+The category with the highest count is the largest, stationary central bubble. The current leader keeps its place on a tie; a strictly larger count changes centre ownership atomically with the saved thoughts. Surrounding bubbles share a slow orbit clock, keep upright labels and animate size/position changes with Reanimated on the native UI thread. Centre exchanges gently fade while crossing. Motion pauses on touch, in thought popups, away from the dashboard, in the background and for the system Reduced Motion setting. A user pause/resume control is also available. At most six satellites are shown per orbit group; Previous/Next keeps every category reachable while preserving the same central leader and readable touch targets.
+
+Android and iOS now persist original dumps, thought parts, categories, the local profile and central bubble ownership in SQLite. The browser preview uses localStorage and identifies this in the interface. See [local storage](local-storage.md) for the schema and verification instructions.
 
 ## Next milestone: actual local Gemma
 

@@ -6,6 +6,7 @@ import { StyleSheet, View } from 'react-native';
 import OrbitNavigation from '@/components/orbit-navigation';
 import { OrbitBackground } from '@/components/orbit-art';
 import { OrbitProvider } from '@/state/orbit-context';
+import { LoginProvider } from '@/state/login-context';
 
 const pageBackground = '#254431';
 const theme = { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: pageBackground, card: '#DCE8DB', primary: '#173F30' } };
@@ -24,10 +25,11 @@ export default function RootLayout() {
   const [headerHeight, setHeaderHeight] = useState(0);
   return (
     <ThemeProvider value={theme}>
+      <StatusBar style="light" />
       <OrbitProvider>
+        <LoginProvider>
         <View style={styles.root}>
           <OrbitBackground />
-          <StatusBar style="light" />
           <View onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}>
             <OrbitNavigation />
           </View>
@@ -42,6 +44,7 @@ export default function RootLayout() {
             <Stack.Screen name="profile" />
           </Stack>
         </View>
+        </LoginProvider>
       </OrbitProvider>
     </ThemeProvider>
   );

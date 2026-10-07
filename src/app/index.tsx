@@ -7,11 +7,12 @@ import { OrbitIcon } from '@/components/orbit-art';
 import { ThoughtOrbit } from '@/components/thought-orbit';
 import { OrbitButton, OrbitDialog } from '@/components/orbit-ui';
 import { orbitColors, previewEncouragement } from '@/constants/orbit-theme';
+import { dominantCategory } from '@/services/bubble-layout';
 import { suggestedCategories } from '@/services/thought-organizer';
 import { profileInitials, useOrbit } from '@/state/orbit-context';
 
 export default function HomeScreen() {
-  const { thoughts, categories, dominantCategoryId, profile, addThought } = useOrbit();
+  const { thoughts, categories, dominantCategoryId, storageKind, profile, addThought } = useOrbit();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const [composerOpen, setComposerOpen] = useState(false);
@@ -67,7 +68,7 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <ThoughtOrbit categories={categories} counts={counts} leaderId={dominantCategoryId}
+          <ThoughtOrbit categories={categories} counts={counts} leaderId={dominantCategory(categories, counts, dominantCategoryId)}
             paused={composerOpen || openCategory !== null || pathname !== '/'} onOpen={setOpenCategory} />
 
           <View style={styles.actions}>
@@ -82,7 +83,7 @@ export default function HomeScreen() {
                 <Text style={styles.previewLabel}>Preview encouragement</Text>
               </View>
             </View>
-            <Text style={styles.sessionNote}>UI preview · thoughts stay only until the app restarts</Text>
+            <Text style={styles.storageNote}>Saved {storageKind === 'browser' ? 'in this browser' : 'on this device'}</Text>
           </View>
         </View>
       </ScrollView>
@@ -107,7 +108,7 @@ export default function HomeScreen() {
         </View>
         <TextInput value={categoryHint} onChangeText={setCategoryHint} editable={!submitting} maxLength={48}
           placeholder="Or name your own category" placeholderTextColor="#738574" accessibilityLabel="Optional category name" style={styles.categoryInput} />
-        <Text style={styles.sheetFootnote}>Leave this blank to sort each sentence. A category hint puts the whole entry in that bubble. Thoughts stay for this session only.</Text>
+        <Text style={styles.sheetFootnote}>Leave this blank to sort each sentence. A category hint puts the whole entry in that bubble.</Text>
         {!!submitError && <Text style={styles.error} accessibilityRole="alert">{submitError}</Text>}
         <OrbitButton disabled={!thought.trim() || submitting} onPress={submitThought}>{submitting ? 'Organising your thoughts…' : 'Add to my Orbit'}</OrbitButton>
       </OrbitDialog>
@@ -146,7 +147,7 @@ const styles = StyleSheet.create({
   cardLabel: { fontSize: 12, color: orbitColors.ink, marginBottom: 7 },
   quote: { fontSize: 15, lineHeight: 22, color: '#1C3325' },
   previewLabel: { fontSize: 10, color: orbitColors.muted, marginTop: 9 },
-  sessionNote: { fontSize: 10, color: '#234432', textAlign: 'center' },
+  storageNote: { fontSize: 10, color: '#234432', textAlign: 'center' },
   saveNotice: { fontSize: 13, lineHeight: 20, color: orbitColors.white, textAlign: 'center' },
   error: { fontSize: 13, lineHeight: 20, color: '#9B302C' },
   pressed: { opacity: 0.75 },

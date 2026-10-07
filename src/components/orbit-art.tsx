@@ -87,7 +87,7 @@ export function OrbitRings() {
   );
 }
 
-export type OrbitIconName = 'orbit' | 'person' | 'leaf' | 'plus' | 'close' | 'edit' | 'arrow' | 'menu' | 'back';
+export type OrbitIconName = 'orbit' | 'person' | 'leaf' | 'plus' | 'close' | 'edit' | 'arrow' | 'menu' | 'back' | 'lock';
 export function OrbitIcon({ name, color = '#173F30', size = 24 }: {
   name: OrbitIconName; color?: string; size?: number;
 }) {
@@ -111,6 +111,11 @@ export function OrbitIcon({ name, color = '#173F30', size = 24 }: {
       {name === 'arrow' && <Path d="M5 12h14m-5-5 5 5-5 5" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />}
       {name === 'menu' && <Path d="M4 6h16M4 12h16M4 18h16" stroke={color} strokeWidth="1.8" strokeLinecap="round" />}
       {name === 'back' && <Path d="M19 12H5m5-5-5 5 5 5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />}
+      {name === 'lock' && <>
+        <Path d="M7 10V7a5 5 0 0 1 10 0v3" stroke={color} strokeWidth="1.7" />
+        <Rect x="4" y="10" width="16" height="12" rx="3" stroke={color} strokeWidth="1.7" />
+        <Path d="M12 15v3" stroke={color} strokeWidth="1.7" strokeLinecap="round" />
+      </>}
     </Svg>
   );
 }

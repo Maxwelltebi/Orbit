@@ -1,21 +1,6 @@
 // Compile only the platform-independent logic; no native runtime or extra dependencies needed.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const ts = require('typescript');
-const cache = new Map();
-function load(relative) {
-  const filename = path.resolve(__dirname, '..', relative);
-  if (cache.has(filename)) return cache.get(filename).exports;
-  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  const module = { exports: {} };
-  cache.set(filename, module);
-  const requireLocal = (name) => name.startsWith('.') ? load(path.relative(path.resolve(__dirname, '..'), path.resolve(path.dirname(filename), name + '.ts'))) : require(name);
-  new Function('require', 'module', 'exports', output)(requireLocal, module, module.exports);
-  return module.exports;
-}
+const load = require('./lib/load-ts.cjs');
 const organizer = load('src/services/thought-organizer.ts');
 const store = load('src/state/thought-store.ts');
 const layout = load('src/services/bubble-layout.ts');
