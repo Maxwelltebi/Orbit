@@ -19,7 +19,7 @@ export default function ProfileScreen() {
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 58, paddingBottom: insets.bottom + 110 }]}>
+        contentContainerStyle={[styles.scrollContent, { paddingTop: 28, paddingBottom: insets.bottom + 28 }]}>
         <View style={styles.content}>
           <Text style={styles.title} accessibilityRole="header">Your profile</Text>
           <Text style={styles.subtitle}>A little about you.</Text>
@@ -55,7 +55,7 @@ export default function ProfileScreen() {
             <OrbitIcon name="orbit" size={22} color="#345B40" />
             <View style={styles.noteText}>
               <Text style={styles.noteTitle}>Your space. No account needed.</Text>
-              <Text style={styles.noteBody}>This UI preview keeps your changes until the app restarts. Permanent storage is the next step.</Text>
+              <Text style={styles.noteBody}>Changes in this preview last until the app restarts.</Text>
             </View>
           </View>
         </View>

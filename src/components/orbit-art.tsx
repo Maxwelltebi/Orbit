@@ -1,11 +1,11 @@
 import { useId } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
 
-export function OrbitBackground() {
+export function OrbitBackground({ style }: { style?: StyleProp<ViewStyle> } = {}) {
   const id = useId().replace(/:/g, '');
   return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+    <View pointerEvents="none" style={[StyleSheet.absoluteFill, style]}>
       <Svg width="100%" height="100%" viewBox="0 0 400 850" preserveAspectRatio="none">
         <Defs>
           <RadialGradient id={`${id}-base`} cx="20%" cy="92%" r="100%">
@@ -87,7 +87,7 @@ export function OrbitRings() {
   );
 }
 
-export type OrbitIconName = 'orbit' | 'person' | 'leaf' | 'plus' | 'close' | 'edit' | 'arrow';
+export type OrbitIconName = 'orbit' | 'person' | 'leaf' | 'plus' | 'close' | 'edit' | 'arrow' | 'menu' | 'back';
 export function OrbitIcon({ name, color = '#173F30', size = 24 }: {
   name: OrbitIconName; color?: string; size?: number;
 }) {
@@ -109,6 +109,8 @@ export function OrbitIcon({ name, color = '#173F30', size = 24 }: {
       {name === 'close' && <Path d="m6 6 12 12M18 6 6 18" stroke={color} strokeWidth="1.8" strokeLinecap="round" />}
       {name === 'edit' && <Path d="m5 15-1 5 5-1L20 8l-4-4ZM13 7l4 4" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />}
       {name === 'arrow' && <Path d="M5 12h14m-5-5 5 5-5 5" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />}
+      {name === 'menu' && <Path d="M4 6h16M4 12h16M4 18h16" stroke={color} strokeWidth="1.8" strokeLinecap="round" />}
+      {name === 'back' && <Path d="M19 12H5m5-5-5 5 5 5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />}
     </Svg>
   );
 }

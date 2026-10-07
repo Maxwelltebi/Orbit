@@ -1,37 +1,34 @@
 import { createContext, useContext, useRef, useState, type ReactNode } from 'react';
 
-export const categories = [
-  { id: 'family', label: 'Family', x: 77, y: 84, radius: 45 },
-  { id: 'school', label: 'School', x: 273, y: 107, radius: 44 },
-  { id: 'future', label: 'The future', x: 171, y: 177, radius: 64 },
-  { id: 'money', label: 'Money', x: 56, y: 246, radius: 37 },
-  { id: 'what-if', label: 'What if?', x: 254, y: 282, radius: 34 },
-] as const;
-
-export type CategoryId = (typeof categories)[number]['id'];
-export type Thought = { id: string; text: string; categoryId: CategoryId; createdAt: number };
+import { organizeManually, organizePreview, validateOrganization, type Category, type ThoughtOrganizer } from '@/services/thought-organizer';
+import { appendThoughtDump, emptyThoughtStore, type Thought, type ThoughtDump } from './thought-store';
 type Profile = { name: string; about: string };
 type OrbitState = {
-  thoughts: Thought[]; profile: Profile;
-  addThought: (text: string, categoryId: CategoryId) => void;
+  thoughts: Thought[]; categories: Category[]; dumps: ThoughtDump[]; profile: Profile;
+  addThought: (text: string, category?: string) => Promise<{ count: number; categories: string[]; unsorted: boolean }>;
   updateProfile: (profile: Profile) => void;
 };
 const OrbitContext = createContext<OrbitState | null>(null);
 
 // This first UI milestone uses session state. SQLite will replace this storage layer.
-export function OrbitProvider({ children }: { children: ReactNode }) {
-  const [thoughts, setThoughts] = useState<Thought[]>([]);
+export function OrbitProvider({ children, organizer = organizePreview }: { children: ReactNode; organizer?: ThoughtOrganizer }) {
+  const [store, setStore] = useState(emptyThoughtStore);
   const [profile, setProfile] = useState<Profile>({ name: '', about: '' });
   const sequence = useRef(0);
-  function addThought(text: string, categoryId: CategoryId) {
+  async function addThought(text: string, category?: string) {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) throw new Error('Write a thought first.');
+    const organization = validateOrganization(trimmed, category?.trim()
+      ? organizeManually(trimmed, category) : await organizer(trimmed, store.categories));
     sequence.current += 1;
-    const thought = { id: `${Date.now()}-${sequence.current}`, text: trimmed, categoryId, createdAt: Date.now() };
-    setThoughts((current) => [thought, ...current]);
+    const dump = { id: `${Date.now()}-${sequence.current}`, text: trimmed, createdAt: Date.now(), method: organization.method };
+    // Commit every segment/category together; failed sorting never partially saves a dump.
+    setStore((current) => appendThoughtDump(current, dump, organization));
+    const labels = [...new Set(organization.parts.map((part) => part.category))];
+    return { count: organization.parts.length, categories: labels, unsorted: labels.includes('Unsorted') };
   }
   return (
-    <OrbitContext value={{ thoughts, profile, addThought, updateProfile: setProfile }}>
+    <OrbitContext value={{ ...store, profile, addThought, updateProfile: setProfile }}>
       {children}
     </OrbitContext>
   );

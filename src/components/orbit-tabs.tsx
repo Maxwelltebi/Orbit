@@ -18,7 +18,7 @@ function OrbitTabBar({ state, descriptors, navigation }: TabBarProps) {
           const title = descriptors[route.key].options.title ?? route.name;
           return (
             <Pressable key={route.key} accessibilityRole="tab" accessibilityLabel={title}
-              accessibilityState={{ selected: focused }}
+              accessibilityState={{ selected: focused }} aria-selected={focused}
               onPress={() => {
                 const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
                 if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);

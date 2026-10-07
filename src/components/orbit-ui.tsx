@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
 import {
-  KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View,
+  Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View,
   type StyleProp, type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,25 +24,34 @@ export function OrbitButton({ children, onPress, disabled = false, icon, style }
   );
 }
 
-export function OrbitSheet({ visible, title, onClose, children }: {
+export function OrbitDialog({ visible, title, onClose, children }: {
   visible: boolean; title: string; onClose: () => void; children: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  function closeDialog() {
+    Keyboard.dismiss();
+    onClose();
+  }
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={closeDialog} statusBarTranslucent navigationBarTranslucent>
       <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close dialog" />
-        <View style={[styles.sheet, { marginTop: insets.top + 24, paddingBottom: Math.max(insets.bottom, 20) }]} accessibilityViewIsModal>
-          <View style={styles.handle} />
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle} accessibilityRole="header">{title}</Text>
-            <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+        <Pressable style={StyleSheet.absoluteFill} onPress={closeDialog} accessibilityRole="button" accessibilityLabel="Close dialog" />
+        <View pointerEvents="box-none" style={[styles.dialogPosition, {
+          paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24,
+          paddingLeft: insets.left + 20, paddingRight: insets.right + 20,
+        }]}>
+        <View style={styles.dialog} accessibilityViewIsModal role="dialog" accessibilityLabel={title}>
+          <View style={styles.dialogHeader}>
+            <Text style={styles.dialogTitle} accessibilityRole="header">{title}</Text>
+            <Pressable onPress={closeDialog} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
               <OrbitIcon name="close" size={22} />
             </Pressable>
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
+          <ScrollView style={styles.dialogScroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator contentContainerStyle={styles.dialogContent}>
             {children}
           </ScrollView>
+        </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -53,11 +62,12 @@ const styles = StyleSheet.create({
   button: { borderRadius: 28, overflow: 'hidden', minHeight: 48 },
   buttonFill: { flexDirection: 'row', gap: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 14 },
   buttonText: { fontSize: 16, fontWeight: '600', color: orbitColors.white },
-  modal: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(8, 28, 19, 0.55)' },
-  sheet: { backgroundColor: '#EDF3E8', borderTopLeftRadius: 30, borderTopRightRadius: 30, maxHeight: '85%', width: '100%', maxWidth: 520, alignSelf: 'center' },
-  handle: { height: 4, width: 38, borderRadius: 2, backgroundColor: '#AFBEAB', alignSelf: 'center', marginTop: 12 },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', paddingLeft: 24, paddingRight: 14, paddingTop: 8 },
-  sheetTitle: { flex: 1, fontSize: 26, fontWeight: '600', color: orbitColors.ink },
+  modal: { flex: 1, backgroundColor: 'rgba(8, 28, 19, 0.72)' },
+  dialogPosition: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  dialog: { backgroundColor: '#EDF3E8', borderRadius: 28, maxHeight: '100%', flexShrink: 1, width: '100%', maxWidth: 520, paddingBottom: 12, borderWidth: 1, borderColor: '#CBDAC3', boxShadow: '0px 20px 60px rgba(8, 28, 19, 0.35)' },
+  dialogHeader: { flexDirection: 'row', alignItems: 'center', paddingLeft: 24, paddingRight: 12, paddingTop: 14 },
+  dialogTitle: { flex: 1, fontSize: 25, fontWeight: '600', color: orbitColors.ink },
   close: { width: 48, height: 48, justifyContent: 'center', alignItems: 'center' },
-  sheetContent: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 16, gap: 16 },
+  dialogScroll: { flexGrow: 0, flexShrink: 1 },
+  dialogContent: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 16, gap: 16 },
 });
