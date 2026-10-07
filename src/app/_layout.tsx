@@ -38,7 +38,9 @@ export default function RootLayout() {
             screenOptions={{
               headerShown: false,
               contentStyle: { backgroundColor: pageBackground },
-              animation: 'slide_from_right',
+              animation: 'fade',
+              animationDuration: 220,
+              animationMatchesGesture: true,
             }}>
             <Stack.Screen name="index" />
             <Stack.Screen name="profile" />

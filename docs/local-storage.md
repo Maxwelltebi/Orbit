@@ -11,7 +11,7 @@ Android and iOS use Expo SQLite (`orbit.db` in the app's document directory), in
 | `app_state` | Central category ID, preserved when counts tie |
 | `local_login` | PIN verifier version, salt, hash, failed-attempt count and retry timestamp |
 
-Database version 2 adds `local_login` transactionally using `PRAGMA user_version`, preserving every version 1 journal table and entry. An unknown newer database version fails initialization without recreating its tables. Foreign keys enforce relationships. WAL and FULL synchronous mode are configured before transactions. User values use bound parameters.
+Database version 2 added `local_login`; version 3 widens its verifier format constraint without changing any saved verifier, PIN cooldown or journal entry. Both migrations use a transaction and `PRAGMA user_version`. An unknown newer database version fails initialization without recreating its tables. Foreign keys enforce relationships. WAL and FULL synchronous mode are configured before transactions. User values use bound parameters.
 
 The connection is private and every repository operation runs through one queue. This prevents unrelated queries joining Expo's `withTransactionAsync` transaction. A thought submission commits its original text, segments, new categories and centre ownership together. The UI updates only after commit; save failure retains the draft. Profile saves also wait for commit. A startup gate hydrates saved data before mounting forms, with a retry option on failure. Stored profile and thought data are not silently reset on errors.
 
@@ -21,7 +21,13 @@ This database is not encrypted with SQLCipher. Uninstalling or clearing app data
 
 ## Offline login
 
-First-time setup creates one local profile/login, not an online account. Existing thoughts and profile about text remain. Setup commits the name and verifier together; the plain PIN is never written to SQLite, SecureStore, localStorage or logs. Six-digit PINs use PBKDF2-HMAC-SHA256 (600,000 iterations, 16-byte random salt, 32-byte result). A separate 32-byte random pepper is held in Expo SecureStore, backed by Android Keystore/iOS Keychain. Native random bytes come from `expo-crypto`. Async hashing yields to the event loop to keep the interface responsive. The verifier format is versioned; do not change version 1 parameters without a migration strategy.
+First-time setup creates one local profile/login, not an online account. Existing thoughts and profile about text remain. Setup commits the name and verifier together; the plain PIN is never written to SQLite, SecureStore, localStorage or logs. A random 32-byte device key is held in Expo SecureStore, backed by Android Keystore/iOS Keychain. Native random bytes come from `expo-crypto`.
+
+New verifier format 2 uses HMAC-SHA256 keyed with that device key, over the validated ASCII message `orbit.local-pin.v2:<32-character salt hex>:<six-digit PIN>`. Each setup has a fresh 16-byte salt. SQLite stores only its salt and 32-byte verifier, never the device key. This avoids the 600,000-round JavaScript loop that made setup impractically slow in a mobile development runtime. It is a local, device-key-backed PIN lock, not a replacement for a password KDF in an online account. If the device key is compromised, format 2 does not retain format 1's expensive per-guess work factor; the short PIN can be searched quickly. Protecting that key and enforcing attempt cooldowns are essential. The journal is still not encrypted.
+
+Format 1 remains PBKDF2-HMAC-SHA256 (600,000 rounds over `<PIN>:<device-key hex>`, salt decoded from hex). It is checked unchanged, and a successful legacy login upgrades its verifier to format 2 with the same device key and salt. A wrong PIN never triggers an upgrade. Legacy verification can still be slow on a development phone; if it outlasts the UI deadline, it may finish and upgrade in the background but cannot unlock the screen after the timeout. Use byte inputs to avoid depending on TextEncoder in Hermes.
+
+Login operations and profile refresh have 30-second UI deadlines with a stage-specific error. A Stop waiting control clears the entry screen and invalidates any pending unlock. The auth queue remains attached to the cached repository across service recreation: a timed-out native write is not treated as cancelled, so another setup cannot overtake it and replace its device key. A native save already started may finish after the UI stops waiting. Reopening then reads its committed login; saved data is never reset on timeout.
 
 The browser preview keeps its pepper in localStorage and labels the weaker protection in its login screen. It is for UI preview, not sensitive journaling. It does not provide the phone's secure storage.
 
@@ -34,7 +40,7 @@ Crypto documentation: https://docs.expo.dev/versions/v57.0.0/sdk/crypto/
 
 ## Verification
 
-Run `node scripts/test-storage.cjs` for real SQLite file reopen, migration, rollback, foreign key, concurrent save, ordering and profile checks; `node scripts/test-local-login.cjs` for setup rollback, hashing cross-check against Node crypto, restart/cooldown persistence, rejected credentials and missing-key handling; and `node scripts/test-thought-organization.cjs` for sorting and bubble leadership checks. Run `npx expo lint` and `npx tsc --noEmit` for static checks.
+Run `node scripts/test-storage.cjs` for real SQLite file reopen, version 1/2 migration and rollback, foreign keys, concurrent saves, ordering and profile checks; `node scripts/test-local-login.cjs` for verifier cross-checks against Node crypto, legacy upgrade, deadlines, late-save serialization across service recreation, setup rollback, restart/cooldown persistence and missing-key handling; and `node scripts/test-thought-organization.cjs` for sorting and bubble leadership checks. Run `npx expo lint` and `npx tsc --noEmit` for static checks.
 
 On the phone, save a thought and profile, completely close Expo Go, then reopen the same ORBIT project. Confirm the entries, bubbles and profile remain. Also verify a strict centre takeover followed by a tied count keeps the same centre after reopening. The Node checks validate SQL logic; physical-device testing still validates Expo's native SQLite integration.
 
