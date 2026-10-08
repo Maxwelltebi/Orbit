@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.mtebi.Orbit"
     },
     "web": {
       "output": "static",
@@ -34,7 +35,9 @@
         }
       ],
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      "react-native-litert-lm",
+      "./plugins/with-android-ai-build"
     ],
     "experiments": {
       "typedRoutes": true,

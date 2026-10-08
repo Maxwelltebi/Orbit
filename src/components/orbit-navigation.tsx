@@ -11,6 +11,7 @@ import { useLogin } from '@/state/login-context';
 const pages: { href: Href; title: string; icon: OrbitIconName }[] = [
   { href: '/', title: 'My Orbit', icon: 'orbit' },
   { href: '/profile', title: 'Profile', icon: 'person' },
+  { href: '/ai', title: 'On-device AI', icon: 'orbit' },
 ];
 
 export default function OrbitNavigation() {
