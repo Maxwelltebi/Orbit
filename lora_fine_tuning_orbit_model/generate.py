@@ -8,6 +8,7 @@ output file only ever contains valid records. Re-running resumes toward --target
     py generate.py --target 2000
 """
 import argparse
+import http.client
 import json
 import os
 import random
@@ -211,7 +212,7 @@ def call_deepseek(api_key: str, args: argparse.Namespace, system: str, user: str
         except urllib.error.HTTPError as error:
             if error.code in (400, 401, 402, 403):
                 raise FatalAPIError(f"DeepSeek error {error.code}: {error.read().decode(errors='replace')}")
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError):
+        except (OSError, http.client.HTTPException, json.JSONDecodeError, KeyError):  # dropped connections, timeouts
             pass
         time.sleep(2 ** attempt + random.random())
     raise RuntimeError("DeepSeek request failed after 5 attempts")

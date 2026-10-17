@@ -17,6 +17,7 @@ from pathlib import Path
 import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+from transformers.trainer_utils import get_last_checkpoint
 
 from generate import load_env
 from orbit_schema import check_example, from_chat_record, repair_bubbles, word_categories
@@ -132,6 +133,7 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--grad-accum", type=int, default=4)
     parser.add_argument("--rank", type=int, default=16)
+    parser.add_argument("--full", action="store_true", help="train all weights instead of LoRA (use a lower --lr, e.g. 5e-5)")
     parser.add_argument("--max-len", type=int, default=1024, help="app runs with a 1024-token context")
     parser.add_argument("--eval-n", type=int, default=200, help="validation entries to generate on after training")
     parser.add_argument("--max-steps", type=int, default=-1)
@@ -170,10 +172,13 @@ def main() -> None:
         print(f"{name}: {len(datasets[name])} examples ({len(encoded) - len(datasets[name])} over {args.max_len} tokens dropped), "
               f"tokens median {lengths[len(lengths) // 2]} max {lengths[-1]}")
 
-    model = get_peft_model(model, LoraConfig(
-        r=args.rank, lora_alpha=args.rank * 2, lora_dropout=0.05, target_modules="all-linear", task_type="CAUSAL_LM",
-    ))
-    model.print_trainable_parameters()
+    if args.full:
+        print(f"full fine-tune: {sum(p.numel() for p in model.parameters()):,} trainable params")
+    else:
+        model = get_peft_model(model, LoraConfig(
+            r=args.rank, lora_alpha=args.rank * 2, lora_dropout=0.05, target_modules="all-linear", task_type="CAUSAL_LM",
+        ))
+        model.print_trainable_parameters()
 
     steps_per_epoch = math.ceil(len(datasets["train"]) / (args.batch * args.grad_accum))
     total_steps = args.max_steps if args.max_steps > 0 else math.ceil(steps_per_epoch * args.epochs)
@@ -204,17 +209,23 @@ def main() -> None:
         model=model, args=training_args, data_collator=Collator(tokenizer.pad_token_id),
         train_dataset=datasets["train"], eval_dataset=datasets["val"],
     )
-    trainer.train()
+    # Resume from the last saved epoch if a previous run was cut off (e.g. Colab disconnect).
+    checkpoints = args.out / "checkpoints"
+    last = get_last_checkpoint(str(checkpoints)) if checkpoints.is_dir() and not args.smoke else None
+    if last:
+        print(f"resuming from {last}")
+    trainer.train(resume_from_checkpoint=last)
 
-    model.save_pretrained(args.out / "adapter")
+    if not args.full:
+        model.save_pretrained(args.out / "adapter")
     metrics = evaluate(model, tokenizer, records["val"][:args.eval_n], batch_size=args.batch, max_new_tokens=args.max_len // 2)
     (args.out / "eval.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({k: v for k, v in metrics.items() if k not in ("failures", "predictions")}, indent=2))
 
-    merged = model.merge_and_unload()
+    merged = model if args.full else model.merge_and_unload()
     merged.save_pretrained(args.out / "merged")
     tokenizer.save_pretrained(args.out / "merged")
-    print(f"saved adapter, merged model, and eval.json to {args.out}")
+    print(f"saved {'' if args.full else 'adapter, '}merged model, and eval.json to {args.out}")
 
 
 if __name__ == "__main__":
