@@ -36,6 +36,9 @@ LENGTHS = [  # (label, instruction, weight, max topics)
     ("long", "5 to 7 sentences", 0.20, 4),
 ]
 TOPIC_WEIGHTS = {1: 0.35, 2: 0.35, 3: 0.20, 4: 0.10}
+# --multi-topic: more of the long, mixed entries the model gets wrong
+MULTI_LENGTH_WEIGHTS = {"tiny": 0.05, "short": 0.15, "medium": 0.45, "long": 0.35}
+MULTI_TOPIC_WEIGHTS = {1: 0.15, 2: 0.35, 3: 0.30, 4: 0.20}
 STYLES = [
     "all lowercase with little or no punctuation",
     "one long run-on sentence joined with and / so / but",
@@ -171,11 +174,13 @@ def normalize(entry: str) -> str:
     return re.sub(r"\W+", " ", entry.lower()).strip()
 
 
-def batch_request(state: State, rng: random.Random, size: int) -> str:
+def batch_request(state: State, rng: random.Random, size: int, multi_topic: bool = False) -> str:
+    length_weights = [MULTI_LENGTH_WEIGHTS[l[0]] if multi_topic else l[2] for l in LENGTHS]
+    topic_weights = MULTI_TOPIC_WEIGHTS if multi_topic else TOPIC_WEIGHTS
     specs = []
     for i in range(size):
-        label, length, _, max_topics = rng.choices(LENGTHS, weights=[l[2] for l in LENGTHS])[0]
-        topics = min(max_topics, rng.choices(list(TOPIC_WEIGHTS), weights=list(TOPIC_WEIGHTS.values()))[0])
+        label, length, _, max_topics = rng.choices(LENGTHS, weights=length_weights)[0]
+        topics = min(max_topics, rng.choices(list(topic_weights), weights=list(topic_weights.values()))[0])
         style = "clean, normal punctuation" if rng.random() < 0.25 else "; ".join(rng.sample(STYLES, rng.choice([1, 2])))
         specs.append(f"{i + 1}. writer: {rng.choice(PERSONAS)} | length: {length} | style: {style} | topics: {', '.join(state.pick_categories(rng, topics))}")
     return f"Write {size} examples, one per spec, in this order:\n" + "\n".join(specs)
@@ -216,7 +221,7 @@ def worker(state: State, args: argparse.Namespace, api_key: str, system: str, se
     rng = random.Random(seed)
     while not state.done():
         try:
-            content, usage = call_deepseek(api_key, args, system, batch_request(state, rng, args.batch))
+            content, usage = call_deepseek(api_key, args, system, batch_request(state, rng, args.batch, args.multi_topic))
             examples = json.loads(content).get("examples", [])
         except FatalAPIError as error:
             state.fatal = str(error)
@@ -243,6 +248,7 @@ def main() -> None:
     parser.add_argument("--model", default="deepseek-flash")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--thinking", action="store_true", help="let DeepSeek reason before labeling")
+    parser.add_argument("--multi-topic", action="store_true", help="favour longer entries with 2-4 topics")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -250,7 +256,7 @@ def main() -> None:
     state = State(args.out, args.out.with_suffix(".rejects.jsonl"), args.target)
     system = system_prompt()
     if args.dry_run:
-        print(system, "\n\n--- user ---\n", batch_request(state, random.Random(args.seed), args.batch))
+        print(system, "\n\n--- user ---\n", batch_request(state, random.Random(args.seed), args.batch, args.multi_topic))
         return
 
     load_env()

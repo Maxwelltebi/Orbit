@@ -19,7 +19,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 from generate import load_env
-from orbit_schema import check_example, from_chat_record
+from orbit_schema import check_example, from_chat_record, repair_bubbles, word_categories
 
 HERE = Path(__file__).parent
 IGNORE = -100
@@ -61,19 +61,23 @@ def evaluate(model, tokenizer, records: list[dict], batch_size: int, max_new_tok
     """Greedy-generate on held-out entries and score them the way the app will see them."""
     model.eval()
     tokenizer.padding_side = "left"
-    totals = {"n": 0, "valid_json": 0, "passes_rules": 0, "exact_match": 0, "tp": 0, "pred": 0, "gold": 0}
-    samples = []
+    totals = {"n": 0, "valid_json": 0, "passes_rules": 0, "repaired": 0, "exact_match": 0,
+              "tp": 0, "pred": 0, "gold": 0, "words": 0, "words_right": 0}
+    samples, predictions = [], []
     for start in range(0, len(records), batch_size):
         chunk = records[start:start + batch_size]
         prompts = [tokenizer.apply_chat_template(r["messages"][:1], tokenize=False, add_generation_prompt=True) for r in chunk]
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
-        output = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+        output = model.generate(**inputs, max_new_tokens=max_new_tokens, max_length=None, do_sample=False)
         replies = tokenizer.batch_decode(output[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
         for record, reply in zip(chunk, replies):
             entry, gold = from_chat_record(record)
             gold_pairs = {(b["category"], t) for b in gold for t in b["texts"]}
+            gold_words = word_categories(entry, gold)
             totals["n"] += 1
             totals["gold"] += len(gold_pairs)
+            totals["words"] += len(gold_words)
+            predictions.append({"entry": entry, "gold": gold, "reply": reply})
             try:
                 predicted = json.loads(reply)["bubbles"]
                 totals["valid_json"] += 1
@@ -83,8 +87,14 @@ def evaluate(model, tokenizer, records: list[dict], batch_size: int, max_new_tok
             canonical, reason = check_example(entry, predicted)
             if canonical is None:
                 samples.append({"entry": entry, "reply": reply, "problem": reason})
-                continue
-            totals["passes_rules"] += 1
+                canonical = repair_bubbles(entry, predicted)  # what the app would show after repair
+                if canonical is None:
+                    continue
+            else:
+                totals["passes_rules"] += 1
+            totals["repaired"] += 1
+            predictions[-1]["final"] = canonical
+            totals["words_right"] += sum(p == g for p, g in zip(word_categories(entry, canonical), gold_words))
             pred_pairs = {(b["category"], t) for b in canonical for t in b["texts"]}
             totals["pred"] += len(pred_pairs)
             totals["tp"] += len(pred_pairs & gold_pairs)
@@ -96,12 +106,16 @@ def evaluate(model, tokenizer, records: list[dict], batch_size: int, max_new_tok
     return {
         "examples": totals["n"],
         "valid_json": totals["valid_json"] / n,
-        "passes_rules": totals["passes_rules"] / n,  # exact substrings, full coverage, known categories
+        "passes_rules": totals["passes_rules"] / n,  # raw reply: exact substrings, full coverage, known categories
+        "usable_after_repair": totals["repaired"] / n,
+        # the rest score the final bubbles (raw reply if valid, else repaired)
+        "word_category_accuracy": totals["words_right"] / max(totals["words"], 1),
         "exact_match": totals["exact_match"] / n,
         "span_precision": precision,
         "span_recall": recall,
         "span_f1": 2 * precision * recall / max(precision + recall, 1e-9),
         "failures": samples[:20],
+        "predictions": predictions,
     }
 
 
@@ -195,7 +209,7 @@ def main() -> None:
     model.save_pretrained(args.out / "adapter")
     metrics = evaluate(model, tokenizer, records["val"][:args.eval_n], batch_size=args.batch, max_new_tokens=args.max_len // 2)
     (args.out / "eval.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(json.dumps({k: v for k, v in metrics.items() if k != "failures"}, indent=2))
+    print(json.dumps({k: v for k, v in metrics.items() if k not in ("failures", "predictions")}, indent=2))
 
     merged = model.merge_and_unload()
     merged.save_pretrained(args.out / "merged")

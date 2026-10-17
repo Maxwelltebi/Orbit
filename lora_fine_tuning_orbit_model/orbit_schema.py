@@ -123,6 +123,105 @@ def check_example(entry: str, bubbles: object, require_full_coverage: bool = Tru
     return canonical, None
 
 
+_SENTENCE = re.compile(r".+?(?:[.!?…]+(?=\s|$)|$)", re.S)
+
+
+def _sentences(entry: str) -> list[tuple[int, int]]:
+    """(start, end) of each sentence, whitespace trimmed."""
+    spans = []
+    for match in _SENTENCE.finditer(entry):
+        start, end = match.span()
+        while start < end and entry[start].isspace():
+            start += 1
+        while end > start and entry[end - 1].isspace():
+            end -= 1
+        if _WORD.search(entry[start:end]):
+            spans.append((start, end))
+    return spans
+
+
+def repair_bubbles(entry: str, bubbles: object) -> list[dict] | None:
+    """Turn a near-miss model reply into bubbles that pass check_example.
+
+    The model's choices are kept wherever they are usable; the fixes are mechanical:
+    - a span with stray whitespace or a small rewrite snaps to the closest sentence,
+    - a span that repeats words already claimed loses the repeated part (first wins),
+    - duplicate category bubbles merge, unknown categories become Other,
+    - words left out join the bubble of the text right before them (or after, at the start).
+    Returns None only when nothing in the reply can be placed in the entry.
+    """
+    from difflib import SequenceMatcher
+
+    if not isinstance(bubbles, list):
+        return None
+    canonical, _ = check_example(entry, bubbles)
+    if canonical is not None:  # already valid: leave the model's answer alone
+        return canonical
+    sentences = _sentences(entry)
+    labels: list[str | None] = [None] * len(entry)
+    for bubble in bubbles:
+        if not isinstance(bubble, dict):
+            continue
+        category = bubble.get("category")
+        category = category if category in CATEGORIES else "Other"
+        texts = bubble.get("texts", bubble.get("text", []))
+        for text in [texts] if isinstance(texts, str) else texts if isinstance(texts, list) else []:
+            text = text.strip() if isinstance(text, str) else ""
+            if not _WORD.search(text):
+                continue
+            start = entry.find(text)
+            # prefer an occurrence whose words are not claimed yet
+            while start != -1 and labels[start] is not None and entry.find(text, start + 1) != -1:
+                start = entry.find(text, start + 1)
+            if start != -1:
+                end = start + len(text)
+            else:
+                scored = [(SequenceMatcher(None, text.lower(), entry[s:e].lower()).ratio(), s, e) for s, e in sentences]
+                ratio, start, end = max(scored, default=(0.0, -1, -1))
+                if ratio < 0.75:
+                    continue
+            for i in range(start, end):
+                if labels[i] is None:
+                    labels[i] = category
+
+    if not any(labels):
+        return None
+    # fill gaps from the left neighbour, then a leading gap from the right
+    last = None
+    for i, label in enumerate(labels):
+        last = labels[i] = label or last
+    first = next(label for label in labels if label)
+    labels = [label or first for label in labels]
+
+    # cut into runs of one category, then at sentence ends, trimming whitespace
+    pieces: list[tuple[str, str]] = []
+    run_start = 0
+    for i in range(1, len(entry) + 1):
+        if i == len(entry) or labels[i] != labels[run_start]:
+            run = entry[run_start:i]
+            offset = run_start
+            for match in _SENTENCE.finditer(run):
+                text = match.group().strip()
+                if _WORD.search(text):
+                    pieces.append((labels[offset + match.start()], text))  # type: ignore[arg-type]
+            run_start = i
+    grouped: dict[str, list[str]] = {}
+    for category, text in pieces:
+        grouped.setdefault(category, []).append(text)
+    canonical, _ = check_example(entry, [{"category": c, "texts": t} for c, t in grouped.items()])
+    return canonical
+
+
+def word_categories(entry: str, canonical: list[dict]) -> list[str | None]:
+    """Category of each word in the entry, for valid (canonical) bubbles."""
+    flat = [(b["category"], t) for b in canonical for t in b["texts"]]
+    positions = _locate(entry, [t for _, t in flat]) or []
+    labels: list[str | None] = [None] * len(entry)
+    for (category, _), (start, end) in zip(flat, positions):
+        labels[start:end] = [category] * (end - start)
+    return [labels[m.start()] for m in re.finditer(r"\w+", entry)]
+
+
 def to_chat_record(entry: str, bubbles: list[dict]) -> dict:
     return {"messages": [
         {"role": "user", "content": user_message(entry)},

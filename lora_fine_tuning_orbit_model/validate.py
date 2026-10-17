@@ -25,11 +25,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--allow-gaps", action="store_true", help="allow words that are in no bubble")
     parser.add_argument("--show", type=int, default=10, help="how many rejections to print")
+    parser.add_argument("--exclude", type=Path, help="drop entries that appear in this file (keeps a fixed val set out of train)")
     args = parser.parse_args()
 
     kept: list[dict] = []
     reasons: Counter[str] = Counter()
     shown, seen = 0, set()
+    excluded = set()
+    if args.exclude:
+        excluded = {normalize(from_chat_record(json.loads(l))[0]) for l in args.exclude.read_text(encoding="utf-8").splitlines() if l.strip()}
     lines = args.path.read_text(encoding="utf-8").splitlines()
     for number, line in enumerate(lines, 1):
         if not line.strip():
@@ -41,6 +45,8 @@ def main() -> None:
             canonical, reason = None, f"unparseable record: {error}"
         if canonical is not None and normalize(entry) in seen:
             canonical, reason = None, "duplicate entry"
+        if canonical is not None and normalize(entry) in excluded:
+            canonical, reason = None, "excluded (in --exclude file)"
         if canonical is None:
             reasons[reason.split(":")[0]] += 1
             if shown < args.show:
