@@ -31,6 +31,7 @@ CATEGORIES = {
 }
 
 _WORD = re.compile(r"\w")
+_SENTENCE_END = re.compile(r"[.!?…]\W*$")
 
 
 def user_message(entry: str) -> str:
@@ -60,7 +61,8 @@ def check_example(entry: str, bubbles: object, require_full_coverage: bool = Tru
     """Validate one example. Returns (canonical_bubbles, None) or (None, reason).
 
     Canonical form: texts in entry order within each bubble, bubbles ordered by
-    their first text's position, so the model sees one consistent ordering.
+    their first text's position, and same-category neighbours within a sentence
+    merged, so the model sees one consistent target for each entry.
     """
     if not isinstance(entry, str) or not entry.strip():
         return None, "empty entry"
@@ -101,11 +103,23 @@ def check_example(entry: str, bubbles: object, require_full_coverage: bool = Tru
         if _WORD.search(gap):
             return None, f"words left out of every bubble: {gap.strip()!r}"
 
-    by_category: dict[str, list[tuple[int, str]]] = {}
-    for (category, span), (start, _) in zip(flat, positions):
-        by_category.setdefault(category, []).append((start, span))
-    ordered = sorted(by_category.items(), key=lambda kv: min(p for p, _ in kv[1]))
-    canonical = [{"category": c, "texts": [s for _, s in sorted(items)]} for c, items in ordered]
+    # Merge neighbouring same-category spans inside one sentence, so a sentence is
+    # never chopped into pieces that all land in the same bubble.
+    pieces = sorted((start, end, category) for (category, _), (start, end) in zip(flat, positions))
+    merged: list[list] = []
+    for start, end, category in pieces:
+        if merged and merged[-1][2] == category:
+            prev_end = merged[-1][1]
+            between = entry[prev_end:start]
+            if not re.search(r"[\w.!?…]", between) and not _SENTENCE_END.search(entry[merged[-1][0]:prev_end]):
+                merged[-1][1] = end
+                continue
+        merged.append([start, end, category])
+
+    by_category: dict[str, list[str]] = {}
+    for start, end, category in merged:
+        by_category.setdefault(category, []).append(entry[start:end])
+    canonical = [{"category": c, "texts": texts} for c, texts in by_category.items()]  # first-appearance order
     return canonical, None
 
 

@@ -113,8 +113,10 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=HERE / "runs" / "orbit-lora")
     parser.add_argument("--epochs", type=float, default=3)
     parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--batch", type=int, default=16)
-    parser.add_argument("--grad-accum", type=int, default=1)
+    # Gemma's 262k vocab makes logits huge (batch x tokens x 262144 floats), so keep
+    # micro-batches small and reach an effective batch of 16 through accumulation.
+    parser.add_argument("--batch", type=int, default=4)
+    parser.add_argument("--grad-accum", type=int, default=4)
     parser.add_argument("--rank", type=int, default=16)
     parser.add_argument("--max-len", type=int, default=1024, help="app runs with a 1024-token context")
     parser.add_argument("--eval-n", type=int, default=200, help="validation entries to generate on after training")
@@ -129,7 +131,7 @@ def main() -> None:
             args.train = args.val = HERE / "orbit_samples.jsonl"
         args.out = HERE / "runs" / "smoke"
         args.limit = args.limit or 32
-        args.batch, args.max_steps, args.eval_n, args.rank = 4, 10, 4, 8
+        args.batch, args.grad_accum, args.max_steps, args.eval_n, args.rank = 1, 4, 10, 4, 8
 
     load_env()  # HF_TOKEN for the gated Gemma weights
     cuda = torch.cuda.is_available()

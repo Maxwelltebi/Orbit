@@ -30,10 +30,10 @@ class FatalAPIError(Exception):
 API_URL = "https://api.deepseek.com/chat/completions"
 
 LENGTHS = [  # (label, instruction, weight, max topics)
-    ("tiny", "1 to 6 words", 0.20, 1),
-    ("short", "one sentence or line", 0.25, 2),
+    ("tiny", "2 to 5 words, no more", 0.20, 1),
+    ("short", "one short line, under 20 words", 0.25, 2),
     ("medium", "2 to 4 sentences", 0.35, 3),
-    ("long", "5 to 9 sentences", 0.20, 4),
+    ("long", "5 to 7 sentences", 0.20, 4),
 ]
 TOPIC_WEIGHTS = {1: 0.35, 2: 0.35, 3: 0.20, 4: 0.10}
 STYLES = [
@@ -93,10 +93,20 @@ Labeling rules - every rule is checked by code and failing examples are thrown a
 4. Each text goes to one category. A category can hold several texts. One bubble per category.
 5. Only include categories that actually appear. A one-topic entry gets one bubble.
 6. Pick the single best category for each piece by what it is about. Use "Other" only when nothing fits.
+7. Keep a clause whole: a reason or result ("bc ...", "so ...", "which ...") stays with the clause it belongs to. Do not split a sentence into pieces that all go to the same category.
+
+How to choose between close categories:
+- The topic wins over the emotion: "nervous about my exam" is School, "rent stresses me out" is Money.
+- Worries is for what-ifs and fears about something that might happen; Feelings is for a mood with no clearer topic.
+- Self-Reflection is the writer thinking about themselves; Feelings is just naming the emotion.
+- The writer's own job is Work, even at a school (a teacher marking papers is Work). School is for the writer's own studies.
+- Sports, teams, and games played for fun are Hobbies & Creativity; an injury from them is Health & Body.
+- Missing someone who died is Grief & Loss, even when it mentions their belongings.
 
 Writing rules:
 - Entries sound like a real person typing quickly on a phone, first person, specific and concrete (names, places, days, amounts).
-- Follow the length, style, and topics requested for each example. The topics are a guide; labels must match what you actually wrote.
+- Length and style are strict requirements, not suggestions. A tiny entry really is 2 to 5 words. A messy style really is messy: if it says lowercase, write no capitals; if it says typos or shorthand, use several; if it says run-on, use no full stops. Do not tidy the writing.
+- The topics are a guide; labels must match what you actually wrote.
 - Vary openings, vocabulary, and names. No two entries should feel alike. Avoid starting with "Today".
 
 Good examples (one per line):
@@ -171,15 +181,18 @@ def batch_request(state: State, rng: random.Random, size: int) -> str:
     return f"Write {size} examples, one per spec, in this order:\n" + "\n".join(specs)
 
 
-def call_deepseek(api_key: str, model: str, temperature: float, system: str, user: str) -> tuple[str, dict]:
-    body = json.dumps({
-        "model": model,
+def call_deepseek(api_key: str, args: argparse.Namespace, system: str, user: str) -> tuple[str, dict]:
+    payload = {
+        "model": args.model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "response_format": {"type": "json_object"},
-        "thinking": {"type": "disabled"},
-        "temperature": temperature,
-        "max_tokens": 8000,
-    }).encode()
+        "max_tokens": 16000,
+    }
+    if args.thinking:  # better labels, slower; temperature is ignored in thinking mode
+        payload |= {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+    else:
+        payload |= {"thinking": {"type": "disabled"}, "temperature": args.temperature}
+    body = json.dumps(payload).encode()
     request = urllib.request.Request(API_URL, data=body, headers={
         "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
     })
@@ -203,7 +216,7 @@ def worker(state: State, args: argparse.Namespace, api_key: str, system: str, se
     rng = random.Random(seed)
     while not state.done():
         try:
-            content, usage = call_deepseek(api_key, args.model, args.temperature, system, batch_request(state, rng, args.batch))
+            content, usage = call_deepseek(api_key, args, system, batch_request(state, rng, args.batch))
             examples = json.loads(content).get("examples", [])
         except FatalAPIError as error:
             state.fatal = str(error)
@@ -229,6 +242,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--model", default="deepseek-flash")
     parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--thinking", action="store_true", help="let DeepSeek reason before labeling")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -247,8 +261,10 @@ def main() -> None:
     print(f"resuming with {state.kept} existing examples" if state.kept else "starting fresh")
 
     seed = args.seed * 1000 + state.kept  # new specs on every resume
-    with ThreadPoolExecutor(args.workers) as pool:
-        futures = [pool.submit(worker, state, args, api_key, system, seed + i) for i in range(args.workers)]
+    # No more workers than batches still needed, so little is generated past the target.
+    workers = max(1, min(args.workers, -(-(args.target - state.kept) // args.batch)))
+    with ThreadPoolExecutor(workers) as pool:
+        futures = [pool.submit(worker, state, args, api_key, system, seed + i) for i in range(workers)]
         for future in futures:
             future.result()  # surface unexpected worker crashes
     if state.fatal:
