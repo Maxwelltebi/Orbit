@@ -1,0 +1,8 @@
+# Local CPU smoke test. Install torch first from the CPU index:
+#   .venv/Scripts/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   .venv/Scripts/python -m pip install -r requirements.txt
+# Colab already has torch with CUDA; the notebook installs the rest.
+transformers
+peft
+accelerate
+sentencepiece

@@ -3,5 +3,7 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/lora_fine_tuning_orbit_model/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": ["lora_fine_tuning_orbit_model"]
 }

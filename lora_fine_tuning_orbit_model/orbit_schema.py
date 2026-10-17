@@ -1,0 +1,125 @@
+"""Shared definitions for the Orbit bubble-sorting dataset.
+
+One example = a raw journal entry in, a JSON list of category bubbles out.
+Every bubble text must be copied verbatim from the entry.
+"""
+import json
+import re
+from typing import Any
+
+# Must match the instruction the app sends at inference time.
+INSTRUCTION = "Sort this journal entry into category bubbles. Use only the writer's exact words. Return JSON."
+
+CATEGORIES = {
+    "Work": "job, boss, coworkers, shifts, career, job hunting",
+    "School": "classes, exams, homework, grades, lecturers, school fees",
+    "Money": "rent, bills, spending, saving, debt, salary, prices",
+    "Family": "parents, siblings, relatives, own children, parenting, caring for family",
+    "Relationships": "romantic partner, dating, crushes, breakups, marriage",
+    "Friends": "friends, social life, fitting in, feeling left out by friends",
+    "Health & Body": "sickness, pain, sleep, exercise, food and eating, body image, energy",
+    "Feelings": "present emotions stated as feelings: sad, happy, angry, tired, numb, burned out",
+    "Worries": "what-ifs, anxiety, fear about things that might happen",
+    "Self-Reflection": "self-talk, self-esteem, identity, weighing decisions, values, noticing own patterns",
+    "Goals & Plans": "intentions, resolutions, habits to build, things to learn, future plans",
+    "Gratitude": "thankfulness, appreciation, counting blessings",
+    "Hobbies & Creativity": "music, art, writing, sports for fun, games, shows, crafts",
+    "Faith & Spirituality": "church, mosque, prayer, God, meditation, spiritual life",
+    "Daily Life": "chores, errands, groceries, home, commute, ordinary logistics",
+    "Grief & Loss": "death, mourning, missing someone who died, losing something important",
+    "Other": "anything that clearly fits none of the other categories",
+}
+
+_WORD = re.compile(r"\w")
+
+
+def user_message(entry: str) -> str:
+    return f"{INSTRUCTION}\n\n{entry}"
+
+
+def _locate(entry: str, spans: list[str]) -> list[tuple[int, int]] | None:
+    """Assign each span a non-overlapping position in the entry, earliest first.
+
+    Returns (start, end) per span in input order, or None if no such assignment exists.
+    """
+    order = sorted(range(len(spans)), key=lambda i: entry.find(spans[i]))
+    taken: list[tuple[int, int]] = []
+    result: list[tuple[int, int] | None] = [None] * len(spans)
+    for i in order:
+        span, pos = spans[i], entry.find(spans[i])
+        while pos != -1 and any(pos < e and pos + len(span) > s for s, e in taken):
+            pos = entry.find(span, pos + 1)
+        if pos == -1:
+            return None
+        taken.append((pos, pos + len(span)))
+        result[i] = (pos, pos + len(span))
+    return result  # type: ignore[return-value]
+
+
+def check_example(entry: str, bubbles: object, require_full_coverage: bool = True) -> tuple[list[dict] | None, str | None]:
+    """Validate one example. Returns (canonical_bubbles, None) or (None, reason).
+
+    Canonical form: texts in entry order within each bubble, bubbles ordered by
+    their first text's position, so the model sees one consistent ordering.
+    """
+    if not isinstance(entry, str) or not entry.strip():
+        return None, "empty entry"
+    if not isinstance(bubbles, list) or not bubbles:
+        return None, "no bubbles"
+
+    seen_categories: set[str] = set()
+    flat: list[tuple[str, str]] = []  # (category, span)
+    for bubble in bubbles:
+        if not isinstance(bubble, dict) or set(bubble) != {"category", "texts"}:
+            return None, f"malformed bubble: {bubble!r}"
+        category, texts = bubble["category"], bubble["texts"]
+        if category not in CATEGORIES:
+            return None, f"unknown category: {category!r}"
+        if category in seen_categories:
+            return None, f"duplicate category bubble: {category}"
+        seen_categories.add(category)
+        if not isinstance(texts, list) or not texts:
+            return None, f"empty bubble: {category}"
+        for text in texts:
+            if not isinstance(text, str) or not text.strip():
+                return None, f"empty text in {category}"
+            if text != text.strip():
+                return None, f"leading/trailing whitespace: {text!r}"
+            if text not in entry:
+                return None, f"not an exact substring: {text!r}"
+            flat.append((category, text))
+
+    positions = _locate(entry, [span for _, span in flat])
+    if positions is None:
+        return None, "spans overlap or reuse the same words"
+
+    if require_full_coverage:
+        covered = [False] * len(entry)
+        for start, end in positions:
+            covered[start:end] = [True] * (end - start)
+        gap = "".join(ch for ch, c in zip(entry, covered) if not c)
+        if _WORD.search(gap):
+            return None, f"words left out of every bubble: {gap.strip()!r}"
+
+    by_category: dict[str, list[tuple[int, str]]] = {}
+    for (category, span), (start, _) in zip(flat, positions):
+        by_category.setdefault(category, []).append((start, span))
+    ordered = sorted(by_category.items(), key=lambda kv: min(p for p, _ in kv[1]))
+    canonical = [{"category": c, "texts": [s for _, s in sorted(items)]} for c, items in ordered]
+    return canonical, None
+
+
+def to_chat_record(entry: str, bubbles: list[dict]) -> dict:
+    return {"messages": [
+        {"role": "user", "content": user_message(entry)},
+        {"role": "assistant", "content": json.dumps({"bubbles": bubbles}, ensure_ascii=False)},
+    ]}
+
+
+def from_chat_record(record: dict) -> tuple[str, Any]:
+    """Inverse of to_chat_record. Raises on malformed records. Bubbles are unvalidated."""
+    user, assistant = record["messages"][0]["content"], record["messages"][1]["content"]
+    prefix = f"{INSTRUCTION}\n\n"
+    if not user.startswith(prefix):
+        raise ValueError("user message does not start with the instruction")
+    return user[len(prefix):], json.loads(assistant)["bubbles"]
