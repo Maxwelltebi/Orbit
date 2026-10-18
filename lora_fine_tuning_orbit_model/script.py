@@ -19,8 +19,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 from transformers.trainer_utils import get_last_checkpoint
 
-from generate import load_env
-from orbit_schema import check_example, from_chat_record, repair_bubbles, word_categories
+from orbit_schema import check_example, from_chat_record, load_env, repair_bubbles, word_categories
 
 HERE = Path(__file__).parent
 IGNORE = -100
@@ -149,7 +148,7 @@ def main() -> None:
         args.limit = args.limit or 32
         args.batch, args.grad_accum, args.max_steps, args.eval_n, args.rank = 1, 4, 10, 4, 8
 
-    load_env()  # HF_TOKEN for the gated Gemma weights
+    load_env()  # optional HF_TOKEN from .env when running locally
     cuda = torch.cuda.is_available()
     # T4 has no bf16 and Gemma 3 overflows in fp16, so fall back to fp32 there.
     bf16 = cuda and torch.cuda.is_bf16_supported()

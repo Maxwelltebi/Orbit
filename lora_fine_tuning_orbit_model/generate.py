@@ -21,7 +21,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from orbit_schema import CATEGORIES, check_example, from_chat_record, to_chat_record
+from orbit_schema import CATEGORIES, check_example, from_chat_record, load_env, to_chat_record
 
 HERE = Path(__file__).parent
 
@@ -62,15 +62,6 @@ PERSONAS = [
     "grandmother who just got a smartphone", "remote worker who lives alone", "secondary school teacher",
     "someone who just moved to a new city", "nursing mother back at work", "market trader", "PhD student",
 ]
-
-
-def load_env() -> None:
-    env = HERE / ".env"
-    if env.exists():
-        for line in env.read_text(encoding="utf-8").splitlines():
-            key, sep, value = line.partition("=")
-            if sep and not line.lstrip().startswith("#"):
-                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def few_shot() -> str:

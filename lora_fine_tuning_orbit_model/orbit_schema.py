@@ -4,7 +4,9 @@ One example = a raw journal entry in, a JSON list of category bubbles out.
 Every bubble text must be copied verbatim from the entry.
 """
 import json
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 # Must match the instruction the app sends at inference time.
@@ -31,6 +33,15 @@ CATEGORIES = {
 }
 
 _WORD = re.compile(r"\w")
+
+
+def load_env(path: Path = Path(__file__).parent / ".env") -> None:
+    """Load KEY=value lines from .env into os.environ (existing variables win)."""
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep and not line.lstrip().startswith("#"):
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 _SENTENCE_END = re.compile(r"[.!?…]\W*$")
 
 
