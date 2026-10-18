@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { AppState, Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { OrbitButton } from '@/components/orbit-ui';
 import { orbitColors } from '@/constants/orbit-theme';
 import { checkAiRuntime } from '@/services/ai-runtime-check';
 import type { RuntimeCheck } from '@/services/ai-runtime-types';
-import { customSortingLimit, reviewCustomSorting } from '@/services/custom-sorting-test';
-import { gemmaTester } from '@/services/gemma-test';
-import { categoryTestText, evaluateCategoryTest, categoryCatalogueCount, categoryTestRequest } from '@/services/gemma-category-test';
+import { readSorterReply, sorterCategories, sorterEntryLimit } from '@/services/orbit-bubbles';
+import { listSorterModels, sorterTester, type SorterModel } from '@/services/orbit-sorter-test';
+
+function readModels(): { models: SorterModel[]; error: string } {
+  try {
+    return { models: listSorterModels(), error: '' };
+  } catch (error) {
+    return { models: [], error: error instanceof Error ? error.message : 'Could not list the models on this device.' };
+  }
+}
 
 function memorySize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return 'Unavailable';
@@ -18,28 +25,31 @@ function memorySize(bytes: number): string {
 export default function AiScreen() {
   const insets = useSafeAreaInsets();
   const [checking, setChecking] = useState(false);
-  const [customText, setCustomText] = useState('');
   const [result, setResult] = useState<RuntimeCheck | null>(null);
-  const test = useSyncExternalStore(gemmaTester.subscribe, gemmaTester.getState, gemmaTester.getState);
-  const categoryReport = test.result && (test.result.kind === 'categories' || test.result.kind === 'hybrid') ? evaluateCategoryTest(test.result.response, test.result.routing?.localIds) : null;
-  const customReport = test.result?.kind === 'custom' ? reviewCustomSorting(test.result.source ?? '', test.result.response, test.result.routing?.localIds) : null;
+  const [{ models, error: modelError }, setModelList] = useState(readModels);
+  const [chosenModel, setSelectedModel] = useState('');
+  // Default to the newest model, and drop a choice whose file is no longer on the device.
+  const selectedModel = models.some((model) => model.fileName === chosenModel) ? chosenModel : models[0]?.fileName ?? '';
+  const [entry, setEntry] = useState('');
+  const test = useSyncExternalStore(sorterTester.subscribe, sorterTester.getState, sorterTester.getState);
+  const report = test.result?.request ? readSorterReply(test.result.request.entry, test.result.response) : null;
   const pending = useRef(false);
   const generation = useRef(0);
 
   useEffect(() => {
     const appState = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') gemmaTester.cancel();
+      if (next !== 'active') sorterTester.cancel();
     });
     const session = generation;
     return () => {
       session.current++;
       appState.remove();
-      gemmaTester.cancel();
+      sorterTester.cancel();
     };
   }, []);
 
   async function runCheck() {
-    if (pending.current || gemmaTester.getState().busy) return;
+    if (pending.current || sorterTester.getState().busy) return;
     pending.current = true;
     const request = generation.current;
     setChecking(true);
@@ -52,7 +62,10 @@ export default function AiScreen() {
           timer = setTimeout(() => resolve({ status: 'error', message: 'The check took too long. Reload ORBIT and try again.' }), 10000);
         }),
       ]);
-      if (request === generation.current) setResult(outcome);
+      if (request === generation.current) {
+        setResult(outcome);
+        setModelList(readModels());
+      }
     } finally {
       if (timer) clearTimeout(timer);
       pending.current = false;
@@ -67,7 +80,7 @@ export default function AiScreen() {
         <Text style={styles.subtitle}>A little intelligence, right here.</Text>
         <View style={styles.card}>
           <Text style={styles.heading}>First, check your device</Text>
-          <Text style={styles.body}>Check that the AI runtime responds and see how much memory is available. This check does not download a model or send your thoughts anywhere.</Text>
+          <Text style={styles.body}>Check that the AI runtime responds and see how much memory is available. This check does not load a model or send your thoughts anywhere.</Text>
           <OrbitButton disabled={checking || test.busy} style={styles.button} onPress={runCheck}>{checking ? 'Checking runtime...' : result ? 'Check again' : 'Check runtime'}</OrbitButton>
           <View accessibilityLiveRegion="polite">
             {checking && <Text style={styles.note}>Reading available memory...</Text>}
@@ -78,10 +91,9 @@ export default function AiScreen() {
                 <View style={styles.reading}><Text style={styles.label}>Device</Text><Text style={styles.value}>{Platform.OS === 'android' ? 'Android' : 'iOS'}</Text></View>
                 <View style={styles.reading}><Text style={styles.label}>Available RAM</Text><Text style={styles.value}>{memorySize(result.availableMemoryBytes)}</Text></View>
                 <View style={styles.reading}><Text style={styles.label}>ORBIT memory usage</Text><Text style={styles.value}>{memorySize(result.residentBytes)}</Text></View>
-                <View style={styles.reading}><Text style={styles.label}>Cached model files</Text><Text style={styles.value}>{result.cachedModelCount}</Text></View>
+                <View style={styles.reading}><Text style={styles.label}>Model files on device</Text><Text style={styles.value}>{result.cachedModelCount}</Text></View>
                 <Text style={styles.note}>Measured at {new Date(result.checkedAt).toLocaleTimeString()}. Available memory changes as other apps run.</Text>
                 {result.isLowMemory && <Text style={styles.error}>Your device reports low memory. Close other apps before testing a model.</Text>}
-                <Text style={styles.note}>This confirms the runtime connection. Next, test the downloaded model before using it to organise your thoughts.</Text>
               </View>
             )}
             {result && result.status !== 'ready' && (
@@ -92,109 +104,77 @@ export default function AiScreen() {
             )}
           </View>
         </View>
+
         <View style={styles.card}>
-          <Text style={styles.heading}>Test Gemma</Text>
-          <Text style={styles.body}>Gemma 3 270M will generate one short encouraging sentence using the model saved on this device. Keep ORBIT open during the test.</Text>
-          <Text style={styles.note}>Nothing is downloaded or sent online. Your saved thoughts are not used in this test.</Text>
-          <OrbitButton disabled={checking || test.busy} style={styles.button} onPress={() => { if (!pending.current) void gemmaTester.start('encouragement'); }}>
-            {test.busy && test.kind === 'encouragement' ? test.phase === 'loading' ? 'Loading Gemma...' : test.phase === 'generating' ? 'Generating...' : 'Finishing test...' : 'Test Gemma'}
-          </OrbitButton>
-          <Text style={styles.note}>Thought sorting still uses the preview organiser. Test categories below to check the next model capability.</Text>
-        </View>
-        <View style={styles.card}>
-          <Text style={styles.heading}>Test categories</Text>
-          <Text style={styles.body}>Check six sample thoughts using a broad catalogue. Local retrieval offers a few choices per sentence; Gemma selects only category IDs.</Text>
-          <Text style={styles.note}>{categoryCatalogueCount} available categories, including Other. No category names can be invented.</Text>
-          <Text selectable style={styles.sample}>{categoryTestText}</Text>
-          <Text style={styles.note}>This sample is not saved to your journal. Keep ORBIT open while the test runs.</Text>
-          <OrbitButton disabled={checking || test.busy} style={styles.button} onPress={() => { if (!pending.current) void gemmaTester.start('categories'); }}>
-            {test.busy && test.kind === 'categories' ? test.phase === 'loading' ? 'Loading Gemma...' : test.phase === 'generating' ? 'Sorting sample...' : 'Finishing test...' : 'Test categories'}
-          </OrbitButton>
-        </View>
-        <View style={styles.card}>
-          <Text style={styles.heading}>Test fast sorting</Text>
-          <Text style={styles.body}>Clear topic matches are sorted locally. Only thoughts with competing or unclear topics go to Gemma.</Text>
-          <Text style={styles.note}>Uses the same six thoughts. Results show Local match or Gemma for every sentence. Local results do not count as model accuracy.</Text>
-          <OrbitButton disabled={checking || test.busy} style={styles.button} onPress={() => { if (!pending.current) void gemmaTester.start('hybrid'); }}>
-            {test.busy && test.kind === 'hybrid' ? test.phase === 'loading' ? 'Preparing sorting...' : 'Sorting...' : 'Test fast sorting'}
-          </OrbitButton>
-        </View>
-        <View style={styles.card}>
-          <Text style={styles.heading}>Try your own thoughts</Text>
-          <Text style={styles.body}>Write a few sentences about different things on your mind. Review how each sentence is sorted.</Text>
-          <TextInput accessibilityLabel="Thoughts to test" placeholder="Write a few thoughts here..." placeholderTextColor={orbitColors.muted}
-            multiline textAlignVertical="top" style={styles.input} value={customText} onChangeText={setCustomText}
-            maxLength={customSortingLimit} editable={!checking && !test.busy} />
-          <Text style={styles.note}>{customText.length}/{customSortingLimit} characters. Test text stays on this device and is not saved to your journal.</Text>
-          <OrbitButton disabled={checking || test.busy || !customText.trim()} style={styles.button} onPress={() => {
+          <Text style={styles.heading}>Test the fine-tuned sorter</Text>
+          <Text style={styles.body}>Our fine-tuned Gemma 3 270M reads a whole journal entry and returns bubbles made of your exact words.</Text>
+          <Text style={styles.note}>{sorterCategories.length} categories: {sorterCategories.join(', ')}.</Text>
+
+          <Text style={styles.label}>Model</Text>
+          {modelError ? <Text selectable style={styles.error}>{modelError}</Text>
+            : !models.length ? <Text style={styles.error}>No sorter model found. Copy an orbit-sorter-*.litertlm file into ORBIT with adb, then check again.</Text>
+            : (
+              <View accessibilityRole="radiogroup" style={styles.models}>
+                {models.map((model) => {
+                  const selected = model.fileName === selectedModel;
+                  return (
+                    <Pressable key={model.fileName} accessibilityRole="radio" accessibilityState={{ checked: selected, disabled: test.busy }} disabled={test.busy}
+                      onPress={() => setSelectedModel(model.fileName)} style={[styles.model, selected && styles.modelSelected]}>
+                      <Text style={styles.value}>{model.fileName.replace(/^orbit-sorter-|\.litertlm$/g, '')}</Text>
+                      <Text style={styles.note}>{memorySize(model.sizeBytes)} - copied {new Date(model.lastModifiedMs).toLocaleDateString()}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+          <TextInput accessibilityLabel="Journal entry to sort" placeholder="Write an entry the way you would on a busy day..." placeholderTextColor={orbitColors.muted}
+            multiline textAlignVertical="top" style={styles.input} value={entry} onChangeText={setEntry}
+            maxLength={sorterEntryLimit} editable={!checking && !test.busy} />
+          <Text style={styles.note}>{entry.length}/{sorterEntryLimit} characters. Test text stays on this device and is not saved to your journal.</Text>
+          <OrbitButton disabled={checking || test.busy || !entry.trim() || !selectedModel} style={styles.button} onPress={() => {
             if (pending.current) return;
             Keyboard.dismiss();
-            void gemmaTester.start('custom', customText);
+            void sorterTester.start({ entry, model: selectedModel });
           }}>
-            {test.busy && test.kind === 'custom' ? 'Sorting your thoughts...' : 'Sort my test thoughts'}
+            {test.busy ? test.phase === 'loading' ? 'Loading model...' : test.phase === 'generating' ? 'Sorting your entry...' : 'Finishing test...' : 'Sort my entry'}
           </OrbitButton>
         </View>
+
         {test.phase !== 'idle' && <View style={styles.card}>
-          <Text style={styles.heading}>{test.kind === 'custom' ? 'Your sorting result' : test.kind === 'hybrid' ? 'Fast sorting result' : test.kind === 'categories' ? 'Category test result' : 'Response test result'}</Text>
-          <View accessibilityLiveRegion="polite" style={styles.testOutput}>
-            {test.phase === 'loading' && <Text style={styles.note}>The first load may take a little longer. The test has a two-minute time limit.</Text>}
+          <Text style={styles.heading}>Sorting result</Text>
+          <View accessibilityLiveRegion="polite" style={styles.output}>
+            {test.phase === 'loading' && <Text style={styles.note}>Loading the model. The test has a two-minute time limit.</Text>}
             {test.phase === 'generating' && <Text style={styles.note}>Sorting on this device...</Text>}
-            {test.phase === 'releasing' && <Text style={styles.note}>Finishing and releasing any loaded model...</Text>}
+            {test.phase === 'releasing' && <Text style={styles.note}>Finishing and releasing the model...</Text>}
             {test.phase === 'error' && <Text selectable style={styles.error}>{test.message}</Text>}
-            {test.phase === 'ready' && test.result && (
-              <View style={styles.testOutput}>
-                {customReport ? (
-                  customReport.status === 'invalid' ? <Text selectable style={styles.error}>The sorting response was not usable: {customReport.message}</Text> : (
-                    <View style={styles.testOutput}>
-                      <Text style={styles.body}>{customReport.localCount} local matches; {customReport.modelCount} Gemma choices.</Text>
-                      {customReport.items.map((item) => (
-                        <View key={item.id} style={styles.assignment}>
-                          <Text selectable style={styles.body}>{item.text}</Text>
-                          <Text style={styles.label}>{item.method === 'local' ? 'Local match' : 'Gemma'}</Text>
-                          <Text style={styles.value}>{item.category}</Text>
-                          {item.competingTopics.length > 1 ? (
-                            <Text style={styles.error}>Several topic matches: {item.competingTopics.join(', ')}. Review this thought; one category may not cover it.</Text>
-                          ) : item.needsReview && <Text style={styles.error}>No specific category was chosen. Please review this thought.</Text>}
-                        </View>
-                      ))}
-                      <Text style={styles.note}>Check whether each category fits. Local rules and Gemma can both make mistakes. These choices have not been saved.</Text>
-                    </View>
-                  )
-                ) : categoryReport ? (
-                  categoryReport.status === 'invalid' ? <Text selectable style={styles.error}>The category response was not usable: {categoryReport.message}</Text> : (
-                    <View style={styles.testOutput}>
-                      <Text style={styles.heading}>{categoryReport.topicMatches}/{categoryReport.total} overall topic checks matched</Text>
-                      <Text style={styles.body}>{categoryReport.localCount} local matches; {categoryReport.modelCount} Gemma choices.</Text>
-                      {categoryReport.modelCount > 0 && <Text style={styles.note}>Gemma-only checks: {categoryReport.modelMatches}/{categoryReport.modelCount} matched.</Text>}
-                      {categoryReport.items.map((item) => (
-                        <View key={item.id} style={styles.assignment}>
-                          <Text style={styles.body}>{item.text}</Text>
-                          <Text style={styles.label}>{item.method === 'local' ? 'Local match' : 'Gemma'}</Text>
-                          <Text style={styles.value}>{item.category} - {item.isNew ? 'Would add a bubble' : 'Would reuse a bubble'}</Text>
-                          {!item.topicMatched && <Text style={styles.error}>Topic needs review. Expected: {item.expected}</Text>}
-                        </View>
-                      ))}
-                      <Text style={styles.note}>Overall checks include local matching and Gemma. An overall improvement does not establish better model accuracy. This sample is not saved; broader testing is still needed.</Text>
-                    </View>
-                  )
-                ) : <Text selectable style={styles.body}>{test.result.response}</Text>}
-                {categoryReport && !test.result.routing && <><Text style={styles.note}>This batch offers {categoryTestRequest.offeredCategoryCount} of {categoryCatalogueCount} categories. Prompt: {categoryTestRequest.prompt.length} characters. Response: {test.result.response.length} characters.</Text><Text style={styles.label}>Raw category IDs</Text><Text selectable style={styles.rawResponse}>{test.result.response}</Text></>}
-                {test.result.routing && <View style={styles.testOutput}>
-                  <Text style={styles.note}>Local preparation: {test.result.routing.preparationMs.toFixed(1)} ms. Model input: {test.result.routing.promptCharacters} characters across {test.result.routing.modelIds.length} items.</Text>
-                  <Text style={styles.label}>Combined category IDs (local and model)</Text>
-                  <Text selectable style={styles.rawResponse}>{test.result.response}</Text>
-                </View>}
-                <View style={styles.reading}><Text style={styles.label}>Total test, including cleanup</Text><Text style={styles.value}>{(test.result.totalMs / 1000).toFixed(1)} s</Text></View>
-                {!test.result.usedModel && <Text style={styles.note}>No model was needed for these thoughts.</Text>}
-                {test.result.usedModel && <>
+            {test.phase === 'ready' && test.result && report && (
+              <View style={styles.output}>
+                <Text style={styles.note}>Model: {test.result.request?.model}</Text>
+                {report.status === 'invalid' ? <Text selectable style={styles.error}>{report.message}</Text> : (
+                  <>
+                    <Text style={styles.body}>{report.bubbles.length} {report.bubbles.length === 1 ? 'bubble' : 'bubbles'}</Text>
+                    {report.bubbles.map((bubble) => (
+                      <View key={bubble.category} style={styles.bubble}>
+                        <Text style={styles.value}>{bubble.category}</Text>
+                        {bubble.texts.map((text, index) => <Text key={index} selectable style={styles.body}>{text}</Text>)}
+                      </View>
+                    ))}
+                    {report.repaired
+                      ? <Text style={styles.error}>The raw reply broke a rule ({report.problem}). It was repaired on this device.</Text>
+                      : <Text style={styles.note}>The raw reply followed every rule; no repair was needed.</Text>}
+                  </>
+                )}
+                <Text style={styles.label}>Raw model reply</Text>
+                <Text selectable style={styles.rawResponse}>{report.raw}</Text>
+                <View style={styles.reading}><Text style={styles.label}>Total, including cleanup</Text><Text style={styles.value}>{(test.result.totalMs / 1000).toFixed(1)} s</Text></View>
                 <View style={styles.reading}><Text style={styles.label}>Model load</Text><Text style={styles.value}>{(test.result.loadMs / 1000).toFixed(1)} s</Text></View>
                 <View style={styles.reading}><Text style={styles.label}>Generation</Text><Text style={styles.value}>{(test.result.generationMs / 1000).toFixed(1)} s</Text></View>
                 {test.result.firstTokenMs !== null && <View style={styles.reading}><Text style={styles.label}>First response token</Text><Text style={styles.value}>{(test.result.firstTokenMs / 1000).toFixed(1)} s</Text></View>}
                 <View style={styles.reading}><Text style={styles.label}>ORBIT memory after load</Text><Text style={styles.value}>{memorySize(test.result.loadedMemory.residentBytes)}</Text></View>
                 <View style={styles.reading}><Text style={styles.label}>ORBIT memory after response</Text><Text style={styles.value}>{memorySize(test.result.generatedMemory.residentBytes)}</Text></View>
                 <View style={styles.reading}><Text style={styles.label}>Available RAM after response</Text><Text style={styles.value}>{memorySize(test.result.generatedMemory.availableMemoryBytes)}</Text></View>
-                <Text style={styles.note}>The model has been unloaded. Memory readings are snapshots, not peak usage.</Text>
-                </>}
+                <Text style={styles.note}>Check whether each bubble fits. Nothing has been saved, and the model has been unloaded. Memory readings are snapshots, not peak usage.</Text>
               </View>
             )}
           </View>
@@ -214,10 +194,12 @@ const styles = StyleSheet.create({
   body: { fontSize: 15, lineHeight: 23, color: orbitColors.ink },
   button: { marginTop: 8 },
   result: { gap: 12, paddingTop: 20 },
-  testOutput: { gap: 12 },
-  sample: { fontSize: 15, lineHeight: 23, color: orbitColors.ink, backgroundColor: 'rgba(255,255,255,0.4)', padding: 14, borderRadius: 16 },
+  output: { gap: 12 },
+  models: { gap: 8 },
+  model: { padding: 14, borderRadius: 16, borderWidth: 1, borderColor: '#AABDAA', backgroundColor: 'rgba(255,255,255,0.35)', gap: 2 },
+  modelSelected: { borderColor: orbitColors.ink, borderWidth: 2, backgroundColor: 'rgba(255,255,255,0.6)' },
   input: { height: 156, fontSize: 16, lineHeight: 24, color: orbitColors.ink, backgroundColor: 'rgba(255,255,255,0.55)', borderWidth: 1, borderColor: '#AABDAA', borderRadius: 16, padding: 14 },
-  assignment: { gap: 6, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#AABDAA' },
+  bubble: { gap: 6, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#AABDAA' },
   rawResponse: { fontSize: 13, lineHeight: 20, color: orbitColors.muted },
   reading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#AABDAA', paddingBottom: 10 },
   label: { fontSize: 14, color: orbitColors.muted },

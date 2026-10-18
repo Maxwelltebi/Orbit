@@ -1,19 +1,16 @@
-export type GemmaTestKind = 'encouragement' | 'categories' | 'hybrid' | 'custom';
-
+// One on-device test run: a journal entry sorted by one model file.
+export interface SorterRequest {
+  entry: string;
+  model: string;
+}
 export interface TestMemory {
   availableMemoryBytes: number;
   residentBytes: number;
 }
-export interface HybridTestDetails {
-  localIds: number[]; modelIds: number[]; preparationMs: number; promptCharacters: number; offeredCategoryCount: number;
-}
 export interface GemmaTestResult {
-  usedModel: boolean;
   totalMs: number;
-  routing?: HybridTestDetails;
-  kind: GemmaTestKind;
+  request?: SorterRequest;
   response: string;
-  source?: string;
   loadMs: number;
   generationMs: number;
   firstTokenMs: number | null;
@@ -21,15 +18,13 @@ export interface GemmaTestResult {
   generatedMemory: TestMemory;
 }
 export interface GemmaTestState {
-  kind?: GemmaTestKind;
+  request?: SorterRequest;
   phase: 'idle' | 'loading' | 'generating' | 'releasing' | 'ready' | 'error';
   busy: boolean;
   message?: string;
   result?: GemmaTestResult;
 }
 export interface TestRuntime {
-  usedModel?: boolean;
-  routing?: HybridTestDetails;
   load(): Promise<void>;
   generate(onToken: (token: string) => void, isCancelled: () => boolean): Promise<string>;
   memory(): TestMemory;
@@ -39,22 +34,22 @@ export interface TestRuntime {
 // Own the native instance until its operation AND cleanup settle. A timeout ends
 // the UI wait, not the native operation: this SDK has no cancellation API.
 export function createGemmaTester(
-  prepare: (kind: GemmaTestKind, source?: string) => TestRuntime,
+  prepare: (request?: SorterRequest) => TestRuntime,
   timeoutMs = 120000,
   now: () => number = () => performance.now(),
 ) {
   let state: GemmaTestState = { phase: 'idle', busy: false };
-  let activeKind: GemmaTestKind | undefined;
+  let activeRequest: SorterRequest | undefined;
   const listeners = new Set<(state: GemmaTestState) => void>();
   let abandon: ((message: string) => void) | undefined;
   const publish = (next: GemmaTestState) => {
-    state = { ...next, kind: activeKind };
+    state = { ...next, request: activeRequest };
     listeners.forEach((listener) => listener(state));
   };
 
-  const start = async (kind: GemmaTestKind = 'encouragement', source?: string): Promise<void> => {
+  const start = async (request?: SorterRequest): Promise<void> => {
     if (state.busy) return;
-    activeKind = kind;
+    activeRequest = request;
     const started = now();
     let abandoned = false;
     let runtime: TestRuntime | undefined;
@@ -71,7 +66,7 @@ export function createGemmaTester(
     publish({ phase: 'loading', busy: true });
     const timer = setTimeout(() => abandon?.('The test exceeded two minutes. The native runtime is still finishing; another test is blocked until it releases the model. If this persists, close ORBIT completely and reopen it.'), timeoutMs);
     try {
-      runtime = prepare(kind, source);
+      runtime = prepare(request);
       const loadStarted = now();
       await runtime.load();
       const loadMs = now() - loadStarted;
@@ -84,14 +79,13 @@ export function createGemmaTester(
         if (token.trim() && firstTokenMs === null) firstTokenMs = now() - generationStarted;
       }, () => abandoned);
       if (abandoned) return;
-      if (!response.trim()) throw new Error('Gemma returned an empty response. Please try again.');
+      if (!response.trim()) throw new Error('The model returned an empty response. Please try again.');
       outcome = {
-        usedModel: runtime.usedModel !== false, totalMs: 0, routing: runtime.routing,
-        kind, source: kind === 'custom' ? source : undefined, response: response.trim(), loadMs, generationMs: now() - generationStarted,
+        totalMs: 0, request, response: response.trim(), loadMs, generationMs: now() - generationStarted,
         firstTokenMs, loadedMemory, generatedMemory: runtime.memory(),
       };
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'The Gemma test failed. Please try again.';
+      error = caught instanceof Error ? caught.message : 'The model test failed. Please try again.';
     } finally {
       if (runtime) {
         if (!abandoned) publish({ phase: 'releasing', busy: true });

@@ -234,7 +234,7 @@ def worker(state: State, args: argparse.Namespace, api_key: str, system: str, se
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", type=int, default=2000)
-    parser.add_argument("--out", type=Path, default=HERE.parent / "dataset" / "orbit_bubbles_v2.jsonl")
+    parser.add_argument("--out", type=Path, default=HERE / "dataset" / "orbit_bubbles_v2.jsonl")
     parser.add_argument("--batch", type=int, default=10, help="examples per request")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--model", default="deepseek-flash")

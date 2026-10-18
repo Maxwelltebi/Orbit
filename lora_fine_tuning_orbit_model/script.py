@@ -4,7 +4,7 @@ Local smoke test (CPU, a few steps on the samples, checks the whole pipeline):
     .venv/Scripts/python script.py --smoke
 
 Full run (Colab GPU):
-    python script.py --train ../dataset/orbit_bubbles_v2.clean.train.jsonl --val ../dataset/orbit_bubbles_v2.clean.val.jsonl
+    python script.py --train dataset/orbit_bubbles_v2.clean.train.jsonl --val dataset/orbit_bubbles_v2.clean.val.jsonl
 
 Outputs in --out: adapter/ (LoRA weights), merged/ (full model for LiteRT export),
 eval.json (generation metrics on the validation set).
@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 
 import torch
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 from transformers.trainer_utils import get_last_checkpoint
 
@@ -122,8 +122,8 @@ def evaluate(model, tokenizer, records: list[dict], batch_size: int, max_new_tok
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="google/gemma-3-270m-it")
-    parser.add_argument("--train", type=Path, default=HERE.parent / "dataset" / "orbit_bubbles_v2.clean.train.jsonl")
-    parser.add_argument("--val", type=Path, default=HERE.parent / "dataset" / "orbit_bubbles_v2.clean.val.jsonl")
+    parser.add_argument("--train", type=Path, default=HERE / "dataset" / "orbit_bubbles_v3.train.jsonl")
+    parser.add_argument("--val", type=Path, default=HERE / "dataset" / "orbit_bubbles_v2.clean.val.jsonl")
     parser.add_argument("--out", type=Path, default=HERE / "runs" / "orbit-lora")
     parser.add_argument("--epochs", type=float, default=3)
     parser.add_argument("--lr", type=float, default=2e-4)
@@ -133,6 +133,8 @@ def main() -> None:
     parser.add_argument("--grad-accum", type=int, default=4)
     parser.add_argument("--rank", type=int, default=16)
     parser.add_argument("--full", action="store_true", help="train all weights instead of LoRA (use a lower --lr, e.g. 5e-5)")
+    parser.add_argument("--init-adapter", type=Path, help="continue training this LoRA adapter instead of starting a new one (--rank is then ignored)")
+    parser.add_argument("--extra-val", type=Path, help="a second validation set to score after training, e.g. brain dumps")
     parser.add_argument("--max-len", type=int, default=1024, help="app runs with a 1024-token context")
     parser.add_argument("--eval-n", type=int, default=200, help="validation entries to generate on after training")
     parser.add_argument("--max-steps", type=int, default=-1)
@@ -173,6 +175,10 @@ def main() -> None:
 
     if args.full:
         print(f"full fine-tune: {sum(p.numel() for p in model.parameters()):,} trainable params")
+    elif args.init_adapter:
+        model = PeftModel.from_pretrained(model, str(args.init_adapter), is_trainable=True)
+        print(f"continuing from adapter {args.init_adapter}")
+        model.print_trainable_parameters()
     else:
         model = get_peft_model(model, LoraConfig(
             r=args.rank, lora_alpha=args.rank * 2, lora_dropout=0.05, target_modules="all-linear", task_type="CAUSAL_LM",
@@ -218,8 +224,12 @@ def main() -> None:
     if not args.full:
         model.save_pretrained(args.out / "adapter")
     metrics = evaluate(model, tokenizer, records["val"][:args.eval_n], batch_size=args.batch, max_new_tokens=args.max_len // 2)
+    if args.extra_val:
+        extra = evaluate(model, tokenizer, read_jsonl(args.extra_val)[:args.eval_n], batch_size=args.batch, max_new_tokens=args.max_len // 2)
+        metrics["extra_val"] = {"file": args.extra_val.name, **extra}
+        print(args.extra_val.name, json.dumps({k: v for k, v in extra.items() if k not in ("failures", "predictions")}, indent=2))
     (args.out / "eval.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(json.dumps({k: v for k, v in metrics.items() if k not in ("failures", "predictions")}, indent=2))
+    print(json.dumps({k: v for k, v in metrics.items() if k not in ("failures", "predictions", "extra_val")}, indent=2))
 
     merged = model if args.full else model.merge_and_unload()
     merged.save_pretrained(args.out / "merged")

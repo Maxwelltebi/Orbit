@@ -33,6 +33,7 @@ CATEGORIES = {
 }
 
 _WORD = re.compile(r"\w")
+_SENTENCE_END = re.compile(r"[.!?…]\W*$")
 
 
 def load_env(path: Path = Path(__file__).parent / ".env") -> None:
@@ -42,7 +43,6 @@ def load_env(path: Path = Path(__file__).parent / ".env") -> None:
             key, sep, value = line.partition("=")
             if sep and not line.lstrip().startswith("#"):
                 os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-_SENTENCE_END = re.compile(r"[.!?…]\W*$")
 
 
 def user_message(entry: str) -> str:
@@ -187,7 +187,7 @@ def repair_bubbles(entry: str, bubbles: object) -> list[dict] | None:
             if start != -1:
                 end = start + len(text)
             else:
-                scored = [(SequenceMatcher(None, text.lower(), entry[s:e].lower()).ratio(), s, e) for s, e in sentences]
+                scored = [(SequenceMatcher(None, text.lower(), entry[s:e].lower(), autojunk=False).ratio(), s, e) for s, e in sentences]
                 ratio, start, end = max(scored, default=(0.0, -1, -1))
                 if ratio < 0.75:
                     continue

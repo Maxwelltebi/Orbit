@@ -112,62 +112,41 @@ function fake(overrides = {}) {
   {
     const loading = deferred();
     const { runtime } = fake({ load() { return loading.promise; } });
-    const requests = [];
-    const tester = createGemmaTester((kind) => { requests.push(kind); return runtime; });
-    const run = tester.start('categories');
-    await tester.start('encouragement');
-    assert.deepEqual(requests, ['categories'], 'Both test buttons share one native resource lock');
-    assert.equal(tester.getState().kind, 'categories');
+    const received = [];
+    const tester = createGemmaTester((request) => { received.push(request); return runtime; });
+    const first = { entry: '  My job affects my rent.  ', model: 'orbit-sorter-v3.litertlm' };
+    const run = tester.start(first);
+    await tester.start({ entry: 'A different later input.', model: 'orbit-sorter-v4.litertlm' });
+    assert.deepEqual(received, [first], 'One native resource lock: a blocked start cannot replace the active request');
+    assert.deepEqual(tester.getState().request, first);
     loading.resolve();
     await run;
-    assert.equal(tester.getState().result.kind, 'categories', 'Keep the result associated with the correct test');
-    await tester.start('encouragement');
-    assert.deepEqual(requests, ['categories', 'encouragement']);
-    assert.equal(tester.getState().result.kind, 'encouragement');
-  }
-  {
-    const { runtime } = fake({ usedModel: false, async generate() { return '{}'; } });
-    const tester = createGemmaTester(() => runtime);
-    await tester.start('hybrid');
-    assert.equal(tester.getState().result.usedModel, false);
-    assert.equal(tester.getState().result.firstTokenMs, null, 'Do not invent native token timing for local results');
-    assert.ok(tester.getState().result.totalMs >= 0);
+    assert.deepEqual(tester.getState().result.request, first, 'Associate results with the exact submitted entry and model');
+    const second = { entry: 'Next entry.', model: 'orbit-sorter-v4.litertlm' };
+    await tester.start(second);
+    assert.deepEqual(received, [first, second]);
+    assert.deepEqual(tester.getState().result.request, second);
   }
   {
     const firstBatch = deferred();
-    let secondBatchStarted = false;
+    let finished = false;
     const { runtime, calls } = fake({
       async generate(onToken, isCancelled) {
         await firstBatch.promise;
         if (isCancelled()) throw new Error('interrupted');
-        secondBatchStarted = true;
-        return 'second batch';
+        finished = true;
+        return 'done';
       },
     });
     const tester = createGemmaTester(() => runtime);
-    const run = tester.start('hybrid');
+    const run = tester.start({ entry: 'x', model: 'orbit-sorter-v3.litertlm' });
     await tick();
     tester.cancel();
     firstBatch.resolve();
     await run;
-    assert.equal(secondBatchStarted, false, 'Do not start another batch after background/timeout');
+    assert.equal(finished, false, 'Stop work after background/timeout');
     assert.equal(calls.at(-1), 'release');
     assert.equal(tester.getState().busy, false);
   }
-  {
-    const loading = deferred();
-    const { runtime } = fake({ load() { return loading.promise; } });
-    const received = [];
-    const tester = createGemmaTester((kind, source) => { received.push({ kind, source }); return runtime; });
-    const source = '  My job affects my rent.  ';
-    const run = tester.start('custom', source);
-    await tester.start('custom', 'A different later input.');
-    loading.resolve();
-    await run;
-    assert.deepEqual(received, [{ kind: 'custom', source }], 'A blocked start cannot replace the active source');
-    assert.equal(tester.getState().result.source, source, 'Associate results with the exact submitted input');
-    await tester.start('encouragement');
-    assert.equal(tester.getState().result.source, undefined, 'A later fixed test must not retain private custom text');
-  }
-  console.log('Gemma lifecycle checks passed: success, concurrency, cancellation, timeout, errors, and cleanup.');
+  console.log('Model test lifecycle checks passed: success, concurrency, cancellation, timeout, errors, and cleanup.');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

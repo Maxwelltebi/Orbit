@@ -1,7 +1,7 @@
 """Validate an Orbit bubble dataset (chat-format JSONL) and optionally split it.
 
     py validate.py orbit_samples.jsonl
-    py validate.py ../dataset/orbit_bubbles_v2.jsonl --out ../dataset/orbit_bubbles_v2.clean.jsonl --split 0.1
+    py validate.py dataset/orbit_bubbles_v2.jsonl --out dataset/orbit_bubbles_v2.clean.jsonl --split 0.1
 """
 import argparse
 import json

@@ -48,15 +48,17 @@ For a new experiment, change the settings in step 0 (at minimum `RUN_NAME`) and 
 """),
     md("## 0. Settings"),
     code("""
-RUN_NAME = 'orbit-lora-v3'     # new name = new run folder; same name = resume / reuse
+RUN_NAME = 'orbit-lora-v4-continue'   # new name = new run folder; same name = resume / reuse
+INIT_FROM = 'orbit-lora-v3'    # continue training this run's LoRA adapter; None = start a new LoRA
 FULL_FINETUNE = False          # True trains all 270M weights instead of a LoRA (then use LR = 5e-5)
-EPOCHS = 5
-RANK = 32                      # LoRA rank (ignored for full fine-tune)
-LR = 2e-4
+EPOCHS = 2                     # continuing: 2 epochs; new LoRA: 5
+RANK = 32                      # LoRA rank for a new LoRA (ignored when continuing or full fine-tune)
+LR = 1e-4                      # continuing: 1e-4; new LoRA: 2e-4
 BATCH, GRAD_ACCUM = 4, 4       # 16 examples per step; fits a T4
-TRAIN_FILE = 'orbit_bubbles_v3.train.jsonl'
-VAL_FILE = 'orbit_bubbles_v2.clean.val.jsonl'   # keep fixed so runs are comparable
-BASE_MODEL = 'unsloth/gemma-3-270m-it'          # ungated copy of google/gemma-3-270m-it
+TRAIN_FILE = 'orbit_bubbles_v4_continue.train.jsonl'   # 1,500 brain dumps + 1,500 replayed v3 examples
+VAL_FILE = 'orbit_bubbles_v2.clean.val.jsonl'          # keep fixed so runs are comparable
+EXTRA_VAL_FILE = 'orbit_brain_dumps.val.jsonl'         # second score: lists of unrelated thoughts; None to skip
+BASE_MODEL = 'unsloth/gemma-3-270m-it'                 # ungated copy of google/gemma-3-270m-it
 """),
     md("## 1. Setup"),
     code("""
@@ -65,12 +67,17 @@ import os, json
 from google.colab import drive
 drive.mount('/content/drive')
 DATA = '/content/drive/MyDrive/orbit/dataset'
-RUN = f'/content/drive/MyDrive/orbit/runs/{RUN_NAME}'
+RUNS = '/content/drive/MyDrive/orbit/runs'
+RUN = f'{RUNS}/{RUN_NAME}'
 os.makedirs(RUN, exist_ok=True)
-for name in (TRAIN_FILE, VAL_FILE):
-    path = f'{DATA}/{name}'
-    assert os.path.exists(path), f'Upload {name} to MyDrive/orbit/dataset/ first'
-    print(f'{name}: {sum(1 for _ in open(path))} examples')
+for name in (TRAIN_FILE, VAL_FILE, EXTRA_VAL_FILE):
+    if name:
+        path = f'{DATA}/{name}'
+        assert os.path.exists(path), f'Upload {name} to MyDrive/orbit/dataset/ first'
+        print(f'{name}: {sum(1 for _ in open(path))} examples')
+if INIT_FROM and not FULL_FINETUNE:
+    assert os.path.exists(f'{RUNS}/{INIT_FROM}/adapter/adapter_model.safetensors'), f'No adapter found in runs/{INIT_FROM}/adapter'
+    print(f'continuing from runs/{INIT_FROM}/adapter')
 os.makedirs('/content/orbit', exist_ok=True)
 %cd /content/orbit
 !pip install -q -U "transformers==5.19.0" peft accelerate
@@ -82,14 +89,22 @@ os.makedirs('/content/orbit', exist_ok=True)
 if os.path.exists(f'{RUN}/merged/model.safetensors') and os.path.exists(f'{RUN}/eval.json'):
     print(f'{RUN_NAME} is already trained; skipping. Use a new RUN_NAME to train again.')
 else:
-    mode = '--full' if FULL_FINETUNE else f'--rank {RANK}'
-    !python script.py {mode} --train {DATA}/{TRAIN_FILE} --val {DATA}/{VAL_FILE} --out {RUN} --epochs {EPOCHS} --batch {BATCH} --grad-accum {GRAD_ACCUM} --lr {LR} --model {BASE_MODEL}
+    mode = '--full' if FULL_FINETUNE else f'--init-adapter {RUNS}/{INIT_FROM}/adapter' if INIT_FROM else f'--rank {RANK}'
+    extra = f'--extra-val {DATA}/{EXTRA_VAL_FILE}' if EXTRA_VAL_FILE else ''
+    !python script.py {mode} {extra} --train {DATA}/{TRAIN_FILE} --val {DATA}/{VAL_FILE} --out {RUN} --epochs {EPOCHS} --batch {BATCH} --grad-accum {GRAD_ACCUM} --lr {LR} --model {BASE_MODEL}
+    if _exit_code != 0:
+        raise RuntimeError('Training failed; the error is printed above this message.')
 """),
     md("## 4. Evaluation\n`usable_after_repair` is what the app will see; `word_category_accuracy` is how often words land in the same bubble as the reference labels."),
     code("""
+HIDDEN = ('failures', 'predictions', 'extra_val')
+
 def show_metrics(run_name, failures=8):
     metrics = json.load(open(f'/content/drive/MyDrive/orbit/runs/{run_name}/eval.json'))
-    print(run_name, json.dumps({k: v for k, v in metrics.items() if k not in ('failures', 'predictions')}, indent=2))
+    print(run_name, json.dumps({k: v for k, v in metrics.items() if k not in HIDDEN}, indent=2))
+    if 'extra_val' in metrics:
+        extra = metrics['extra_val']
+        print(extra['file'], json.dumps({k: v for k, v in extra.items() if k not in HIDDEN + ('file',)}, indent=2))
     for failure in metrics['failures'][:failures]:
         print('---', failure['problem'])
         print(failure['entry'])
@@ -102,12 +117,31 @@ show_metrics(RUN_NAME)
 # Compare every finished run side by side
 runs_dir = '/content/drive/MyDrive/orbit/runs'
 keys = ['passes_rules', 'usable_after_repair', 'word_category_accuracy', 'exact_match', 'span_f1']
-print(f"{'run':24}" + ''.join(f'{k[:14]:>16}' for k in keys))
+print(f"{'run':24}" + ''.join(f'{k[:14]:>16}' for k in keys) + f"{'dump word acc':>16}")
 for name in sorted(os.listdir(runs_dir)):
     path = f'{runs_dir}/{name}/eval.json'
     if os.path.exists(path):
         m = json.load(open(path))
-        print(f'{name:24}' + ''.join(f"{m.get(k, float('nan')):>16.3f}" for k in keys))
+        dump = m.get('extra_val', {}).get('word_category_accuracy', float('nan'))
+        print(f'{name:24}' + ''.join(f"{m.get(k, float('nan')):>16.3f}" for k in keys) + f'{dump:>16.3f}')
+"""),
+    md("### Score any finished run on the brain-dump set\nUse this once on `orbit-lora-v3` for a baseline (it was trained before brain dumps existed)."),
+    code("""
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from script import evaluate, read_jsonl
+from pathlib import Path
+
+def score_run(run_name, val_file='orbit_brain_dumps.val.jsonl'):
+    merged = f'{RUNS}/{run_name}/merged'
+    tok = AutoTokenizer.from_pretrained(merged)
+    model = AutoModelForCausalLM.from_pretrained(merged, dtype=torch.bfloat16).to('cuda')
+    metrics = evaluate(model, tok, read_jsonl(Path(f'{DATA}/{val_file}')), batch_size=8, max_new_tokens=512)
+    print(run_name, 'on', val_file, json.dumps({k: v for k, v in metrics.items() if k not in HIDDEN}, indent=2))
+    del model
+    torch.cuda.empty_cache()
+
+score_run('orbit-lora-v3')
 """),
     md("## 5. Export to `.litertlm`\nInt8 weights and a 1024-token context, matching the app's LiteRT-LM settings. Skipped if the export already exists."),
     code("""
@@ -122,6 +156,8 @@ else:
     # litert-torch 0.9.4 needs Cache.get_max_cache_shape, which transformers removed in 5.20
     !pip install -q "transformers==5.19.0"
     !python export_litert.py --merged {RUN}/merged --out {RUN}/litert
+    if _exit_code != 0:
+        raise RuntimeError('Export failed; the error is printed above this message.')
 """),
     md("## 6. Try your own entry"),
     code("""
